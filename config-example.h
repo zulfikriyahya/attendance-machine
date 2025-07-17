@@ -11,6 +11,7 @@
 #define SCK 4
 #define MISO 5
 #define MOSI 6
+
 const char *WIFI_SSIDS[] = {"", "", ""};
 const char *WIFI_PASSWORDS[] = {"", "", ""};
 const int WIFI_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
