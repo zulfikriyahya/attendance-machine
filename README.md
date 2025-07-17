@@ -1,6 +1,6 @@
 # Attendance Machine 📡🎓
 
-Proyek ini adalah sistem **mesin presensi berbasis RFID dengan ESP32**, yang terhubung ke **layanan API Laravel** melalui koneksi WiFi. Data kehadiran dikirim secara real-time dan ditampilkan secara visual melalui layar OLED.
+Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Laravel** via WiFi, dan kini mendukung **mode hemat daya (sleep mode)**. Cocok digunakan di lingkungan sekolah, kantor, dan instansi yang membutuhkan sistem presensi real-time dan efisien.
 
 ---
 
@@ -8,6 +8,7 @@ Proyek ini adalah sistem **mesin presensi berbasis RFID dengan ESP32**, yang ter
 
 - 📶 **Auto WiFi Connect** (Multi SSID)
 - 📡 **Pembacaan RFID** (modul RC522)
+- 💤 **Sleep Mode Terjadwal** (otomatis sleep pada pukul 18.00–05.00)
 - 🧠 **Koneksi ke API Laravel** (JSON POST + API Key)
 - 🖥️ **Layar OLED 0.96"** untuk status real-time
 - 🔊 **Buzzer feedback** (berhasil / gagal / error)
@@ -40,15 +41,28 @@ Proyek ini adalah sistem **mesin presensi berbasis RFID dengan ESP32**, yang ter
 
 ---
 
+## 💤 Tentang Sleep Mode
+
+Perangkat akan otomatis masuk **sleep mode (light sleep)** setiap hari pada **pukul 18.00 hingga 05.00**, di luar jam operasional. Selama mode ini:
+
+- Layar **OLED akan dimatikan** untuk menghemat daya
+- Modul RFID tidak aktif sementara
+- Sistem akan **bangun otomatis** pada pukul 05.00 keesokan harinya
+
+Fitur ini dirancang untuk menghemat konsumsi daya ketika perangkat tidak digunakan, terutama pada malam hari.
+
+---
+
 ## 📁 Struktur Proyek
 
 ```
 attendance-machine/
-├── attendance-machine.ino      # Main sketch (kode utama)
-├── config-example.h            # Template konfigurasi WiFi & API
+├── attendance-machine-with-sleep-mode.ino  # Versi dengan sleep mode aktif
+├── attendance-machine.ino                  # Versi tanpa sleep mode
+├── config-example.h                        # Template konfigurasi WiFi & API
 ├── LICENSE
 ├── .gitignore
-└── schema.svg                  # Diagram koneksi hardware
+└── schema.svg                              # Diagram koneksi hardware
 ```
 
 ---
@@ -98,6 +112,7 @@ const String API_SECRET = "YourSecretKeyHere";
 5. Bila kartu valid → data dikirim ke API Laravel
 6. OLED menampilkan status (nama, waktu, hasil)
 7. Buzzer memberikan feedback suara
+8. Pada pukul 18.00–05.00 → perangkat masuk sleep mode otomatis
 
 ---
 
