@@ -69,7 +69,7 @@ attendance-machine/
 
 ### 2. Konfigurasi
 
-1. Salin `config-example.h` menjadi `secret.h`
+1. Salin `config-example.h` menjadi `config.h`
 2. Isi data berikut:
 
 ```cpp
