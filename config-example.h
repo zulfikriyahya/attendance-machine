@@ -12,9 +12,9 @@
 #define MISO 5
 #define MOSI 6
 
-const char *WIFI_SSIDS[] = {"", "", ""};
-const char *WIFI_PASSWORDS[] = {"", "", ""};
+const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE"};
+const char *WIFI_PASSWORDS[] = {"pass1", "pass2"};
 const int WIFI_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
-const String API_BASE_URL = "";
-const String API_SECRET = "";
+const String API_BASE_URL = "https://example.com/api";
+const String API_SECRET = "YourSecretKeyHere";
 #endif
