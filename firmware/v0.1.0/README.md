@@ -1,8 +1,3 @@
-Berikut adalah versi `README.md` yang telah disesuaikan khusus untuk **firmware v0.1.0** (tanpa sleep mode atau fitur autosync). Fitur-fitur dan deskripsi sudah disesuaikan agar tidak menampilkan informasi dari versi lain:
-
----
-
-```md
 # Attendance Machine 📡🎓
 
 Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Laravel** via WiFi. Cocok digunakan di lingkungan sekolah, kantor, dan instansi yang membutuhkan sistem presensi real-time, cepat, dan efisien.
@@ -46,20 +41,6 @@ Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Lara
 
 ---
 
-## 📁 Struktur Proyek
-```
-
-attendance-machine/
-├── attendance-machine.ino # Firmware utama v0.1.0
-├── config-example.h # Template konfigurasi
-├── LICENSE
-├── .gitignore
-└── schema.svg # Diagram koneksi hardware
-
-````
-
----
-
 ## ⚙️ Instalasi & Setup
 
 ### 1. Persiapan Software
@@ -87,7 +68,7 @@ const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE"};
 const char *WIFI_PASSWORDS[] = {"pass1", "pass2"};
 const String API_BASE_URL = "https://example.com/api";
 const String API_SECRET = "YourSecretKeyHere";
-````
+```
 
 ### 3. Upload ke Board
 
