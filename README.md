@@ -1,87 +1,99 @@
-# Attendance Machine 📡🎓
+# 🎓 Attendance Machine – RFID Presensi + ESP32 + Laravel + WhatsApp
 
-Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Laravel** via WiFi, dan kini mendukung **mode hemat daya (sleep mode)**. Cocok digunakan di lingkungan sekolah, kantor, dan instansi yang membutuhkan sistem presensi real-time dan efisien.
-
----
-
-## 🔧 Fitur Utama
-
-- 📶 **Auto WiFi Connect** (Multi SSID)
-- 📡 **Pembacaan RFID** (modul RC522)
-- 💤 **Sleep Mode Terjadwal** (otomatis sleep pada pukul 18.00–05.00)
-- 🧠 **Koneksi ke API Laravel** (JSON POST + API Key)
-- 🖥️ **Layar OLED 0.96"** untuk status real-time
-- 🔊 **Buzzer feedback** (berhasil / gagal / error)
-- 🔄 **Respon cepat dan anti dobel scan (debounce)**
+Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yang terhubung ke backend **Laravel** dan memberikan notifikasi real-time via **WhatsApp**. Dirancang untuk **pendidikan dan instansi publik**, sistem ini mendukung mode offline, hemat daya, dan sinkronisasi otomatis.
 
 ---
 
-## 🧰 Komponen Hardware
+## 📸 Gambar Wiring (Hardware Schematic)
 
-| Komponen    | Spesifikasi                  |
-| ----------- | ---------------------------- |
-| ESP32-C3    | Super Mini atau setara       |
-| RFID Reader | RC522 (SDA, SCK, MOSI, MISO) |
-| Layar OLED  | 0.96" I2C SSD1306            |
-| Buzzer      | Aktif (Digital ON/OFF)       |
-| Koneksi     | WiFi 2.4GHz                  |
-
-**Pin Default:**
-
-| Fungsi     | Pin ESP32-C3 |
-| ---------- | ------------ |
-| RC522 SS   | GPIO7        |
-| RC522 RST  | GPIO3        |
-| RC522 SCK  | GPIO4        |
-| RC522 MOSI | GPIO6        |
-| RC522 MISO | GPIO5        |
-| OLED SDA   | GPIO8        |
-| OLED SCL   | GPIO9        |
-| Buzzer     | GPIO10       |
+| Versi  | Wiring Diagram                        |
+| ------ | ------------------------------------- |
+| v0.1.0 | ![v0.1.0](firmware/v0.1.0/v0.1.0.svg) |
+| v0.1.1 | ![v0.1.1](firmware/v0.1.1/v0.1.1.svg) |
+| v0.1.2 | ![v0.1.2](firmware/v0.1.2/v0.1.2.svg) |
 
 ---
 
-## 💤 Tentang Sleep Mode
+## 🚀 Daftar Isi
 
-Perangkat akan otomatis masuk **sleep mode (light sleep)** setiap hari pada **pukul 18.00 hingga 05.00**, di luar jam operasional. Selama mode ini:
-
-- Layar **OLED akan dimatikan** untuk menghemat daya
-- Modul RFID tidak aktif sementara
-- Sistem akan **bangun otomatis** pada pukul 05.00 keesokan harinya
-
-Fitur ini dirancang untuk menghemat konsumsi daya ketika perangkat tidak digunakan, terutama pada malam hari.
-
----
-
-## 📁 Struktur Proyek
-
-```
-attendance-machine/
-├── attendance-machine-with-sleep-mode.ino  # Versi dengan sleep mode aktif
-├── attendance-machine.ino                  # Versi tanpa sleep mode
-├── config-example.h                        # Template konfigurasi WiFi & API
-├── LICENSE
-├── .gitignore
-└── schema.svg                              # Diagram koneksi hardware
-```
+- [Fitur Utama](#fitur-utama)
+- [Perbedaan Versi Firmware](#perbedaan-versi-firmware)
+- [Komponen Hardware](#komponen-hardware)
+- [Cara Kerja](#cara-kerja)
+- [Instalasi & Flash Firmware](#instalasi--flash-firmware)
+- [Konfigurasi `config.h`](#konfigurasi-configh)
+- [Integrasi Laravel API](#integrasi-laravel-api)
+- [Lisensi & Kontribusi](#lisensi--kontribusi)
 
 ---
 
-## ⚙️ Instalasi & Setup
+## ✨ Fitur Utama
 
-### 1. Persiapan Software
+- 🔐 **RFID Presensi** (RC522 / PN532)
+- 📡 **WiFi Otomatis** – Multi SSID
+- 💤 **Sleep Mode** – Hemat daya di luar jam aktif
+- 💬 **Notifikasi WhatsApp** – Ke orang tua/pegawai
+- 💾 **Offline Mode** – Sinkron otomatis saat online
+- 📈 **Anti-Dobel Scan** (debounce + timestamp)
+- 🔋 **Portable** – Bisa pakai baterai BL-5C / Li-ion
+- 🖥️ **OLED Display** – Tampilkan nama, waktu, dan status
+- 🔊 **Buzzer Aktif** – Feedback audio
+- 🔧 **Tanpa Reset/Instalasi Ulang** – Plug & play
+- 🔐 **Autentikasi API Token** untuk keamanan
 
-- Arduino IDE terbaru
-- Tambahkan board **ESP32-C3** dari Board Manager
-- Install library berikut:
-  - `MFRC522`
-  - `Adafruit SSD1306`
-  - `Adafruit GFX`
-  - `ArduinoJson`
-  - `WiFi`
-  - `HTTPClient`
+---
 
-### 2. Konfigurasi
+## 🧪 Perbedaan Versi Firmware
+
+| Versi  | Deskripsi Singkat                                     |
+| ------ | ----------------------------------------------------- |
+| v0.1.0 | Firmware dasar: scan RFID, kirim API, tampilkan OLED  |
+| v0.1.1 | Tambahan: sleep mode otomatis di luar jam operasional |
+| v0.1.2 | Tambahan: auto-sync data offline saat online kembali  |
+
+---
+
+## 🛠️ Komponen Hardware
+
+| Komponen | Tipe / Spesifikasi                      |
+| -------- | --------------------------------------- |
+| MCU      | ESP32-C3 Super Mini / S3                |
+| RFID     | RC522 (SPI) / PN532                     |
+| Display  | OLED 0.96" (I2C SSD1306)                |
+| Storage  | (Opsional) SD Card module (SPI)         |
+| Buzzer   | Buzzer aktif (5V/3.3V)                  |
+| Power    | USB / Baterai 3.7V BL-5C / Li-ion 18650 |
+
+---
+
+## ⚙️ Cara Kerja
+
+1. Pengguna men-tap kartu RFID → UID dibaca
+2. Data dikirim ke server Laravel API via WiFi
+3. Jika tidak ada koneksi:
+   - Data disimpan di memori sementara (JSON offline)
+4. Sinkronisasi otomatis saat WiFi kembali
+5. Jika berhasil:
+   - OLED tampilkan nama + waktu
+   - Buzzer berbunyi
+   - WhatsApp terkirim via backend Laravel
+
+---
+
+## 🔧 Instalasi & Flash Firmware
+
+1. Install Arduino IDE atau PlatformIO
+2. Pilih board: **ESP32C3 Dev Module** / **ESP32S3**
+3. Pastikan library berikut terinstall:
+   - `WiFi.h`, `SPI.h`, `Wire.h`
+   - `MFRC522`, `Adafruit_SSD1306`
+   - `ArduinoJson`, `HTTPClient`
+4. Edit `config.h` sesuai kebutuhan (SSID, API, jam kerja, dll)
+5. Upload firmware ke ESP32 via USB
+
+---
+
+## 📝 Konfigurasi `config.h`
 
 1. Salin `config-example.h` menjadi `config.h`
 2. Isi data berikut:
@@ -96,27 +108,9 @@ const String API_BASE_URL = "https://example.com/api";
 const String API_SECRET = "YourSecretKeyHere";
 ```
 
-### 3. Upload ke Board
-
-- Pastikan port USB terdeteksi
-- Compile dan upload seperti biasa via Arduino IDE
-
 ---
 
-## 🔍 Alur Kerja
-
-1. Perangkat menyala → OLED tampil logo dan animasi startup
-2. Terhubung ke WiFi otomatis
-3. Melakukan `ping` ke API untuk memastikan koneksi
-4. Menunggu kartu RFID
-5. Bila kartu valid → data dikirim ke API Laravel
-6. OLED menampilkan status (nama, waktu, hasil)
-7. Buzzer memberikan feedback suara
-8. Pada pukul 18.00–05.00 → perangkat masuk sleep mode otomatis
-
----
-
-## 📡 API Endpoint
+## 🔗 Integrasi Laravel API
 
 ```
 POST /api/presensi/rfid
@@ -130,43 +124,39 @@ Response:
   {
     "message": "Presensi Berhasil",
     "data": {
-      "nama": "John Doe",
+      "nama": "Yahya Zulfikri",
       "waktu": "2025-07-17 07:30",
       "status": "Hadir"
     }
   }
 ```
 
----
+Pastikan backend Laravel kamu:
 
-## 🖼️ Diagram Koneksi
-
-![Schema](schema.svg)
-
----
-
-## ❗ Troubleshooting
-
-- **OLED tidak tampil?** Cek alamat I2C (`0x3C`), pastikan koneksi SDA/SCL benar
-- **RC522 tidak terbaca?** Periksa `SCK`, `MISO`, `MOSI`, `SS`, `RST` sesuai pinout
-- **Gagal WiFi?** Tambahkan lebih dari satu SSID di array `WIFI_SSIDS`
-- **Error JSON?** Pastikan endpoint API aktif dan merespon format yang valid
+- Memverifikasi API key
+- Mencatat log offline → online
+- Mengirim WhatsApp
 
 ---
 
-## 📄 Lisensi
+## 🧠 Backend Laravel (Terpisah)
 
-Proyek ini dilisensikan di bawah MIT License. Lihat file `LICENSE`.
+Sistem backend mendukung:
+
+- CRUD data pegawai/siswa
+- Laporan PDF/Excel berdasarkan filter
+- Dashboard admin (FilamentPHP)
+- Tanda tangan elektronik sah
+- Monitoring status mesin (ping, log, baterai)
+- WhatsApp notification real-time
 
 ---
 
-## 👤 Author
+## ✅ Lisensi & Kontribusi
 
-**Zulfikri Yahya**  
-📍 Indonesia
+Proyek ini bersifat **open-source** dengan lisensi [MIT](LICENSE).
+Kontribusi sangat terbuka — baik dalam bentuk **kode**, **ide**, atau **laporan bug**.
 
 ---
 
-## 🤝 Kontribusi
-
-Pull Request dan laporan isu sangat disambut! Silakan fork proyek ini, modifikasi, dan kirim PR 👍
+> 📌 _Dokumen ini akan terus diperbarui sesuai perkembangan fitur dan penerapan._
