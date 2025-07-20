@@ -142,7 +142,7 @@ Body:
 
 ## 🖼️ Diagram Koneksi
 
-![Schema](v0.1.20.svg)
+![Schema](v0.1.2.svg)
 
 ---
 
