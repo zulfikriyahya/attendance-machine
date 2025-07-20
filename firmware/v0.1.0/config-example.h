@@ -12,13 +12,9 @@
 #define SCK 4
 #define MISO 5
 #define MOSI 6
-const char *WIFI_SSIDS[] = { "ZEDLABS", "ZULFIKRI YAHYA" };
-const char *WIFI_PASSWORDS[] = { "password123", "password123#" };
+const char *WIFI_SSIDS[] = {"ZEDLABS", "ZULFIKRI YAHYA"};
+const char *WIFI_PASSWORDS[] = {"password123", "password123#"};
 const int WIFI_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
 const String API_BASE_URL = "https://example.com/api";
 const String API_SECRET = "YourSecretApiToken";
-const char *ntpServer = "pool.ntp.org";
-const long gmtOffset_sec = 7 * 3600;
-const int daylightOffset_sec = 0;
-bool sdSiap = false;
 #endif
