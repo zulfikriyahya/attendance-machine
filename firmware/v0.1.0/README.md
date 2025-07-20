@@ -1,18 +1,23 @@
-# Attendance Machine 📡🎓
-
-Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Laravel** via WiFi, dan kini mendukung **mode hemat daya (sleep mode)**. Cocok digunakan di lingkungan sekolah, kantor, dan instansi yang membutuhkan sistem presensi real-time dan efisien.
+Berikut adalah versi `README.md` yang telah disesuaikan khusus untuk **firmware v0.1.0** (tanpa sleep mode atau fitur autosync). Fitur-fitur dan deskripsi sudah disesuaikan agar tidak menampilkan informasi dari versi lain:
 
 ---
 
-## 🔧 Fitur Utama
+```md
+# Attendance Machine 📡🎓
+
+Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Laravel** via WiFi. Cocok digunakan di lingkungan sekolah, kantor, dan instansi yang membutuhkan sistem presensi real-time, cepat, dan efisien.
+
+---
+
+## 🔧 Fitur Utama (v0.1.0)
 
 - 📶 **Auto WiFi Connect** (Multi SSID)
 - 📡 **Pembacaan RFID** (modul RC522)
-- 💤 **Sleep Mode Terjadwal** (otomatis sleep pada pukul 18.00–05.00)
 - 🧠 **Koneksi ke API Laravel** (JSON POST + API Key)
 - 🖥️ **Layar OLED 0.96"** untuk status real-time
 - 🔊 **Buzzer feedback** (berhasil / gagal / error)
 - 🔄 **Respon cepat dan anti dobel scan (debounce)**
+- 🔐 **Autentikasi API Token**
 
 ---
 
@@ -41,29 +46,17 @@ Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Lara
 
 ---
 
-## 💤 Tentang Sleep Mode
-
-Perangkat akan otomatis masuk **sleep mode (light sleep)** setiap hari pada **pukul 18.00 hingga 05.00**, di luar jam operasional. Selama mode ini:
-
-- Layar **OLED akan dimatikan** untuk menghemat daya
-- Modul RFID tidak aktif sementara
-- Sistem akan **bangun otomatis** pada pukul 05.00 keesokan harinya
-
-Fitur ini dirancang untuk menghemat konsumsi daya ketika perangkat tidak digunakan, terutama pada malam hari.
-
----
-
 ## 📁 Struktur Proyek
-
 ```
+
 attendance-machine/
-├── attendance-machine-with-sleep-mode.ino  # Versi dengan sleep mode aktif
-├── attendance-machine.ino                  # Versi tanpa sleep mode
-├── config-example.h                        # Template konfigurasi WiFi & API
+├── attendance-machine.ino # Firmware utama v0.1.0
+├── config-example.h # Template konfigurasi
 ├── LICENSE
 ├── .gitignore
-└── schema.svg                              # Diagram koneksi hardware
-```
+└── schema.svg # Diagram koneksi hardware
+
+````
 
 ---
 
@@ -94,12 +87,12 @@ const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE"};
 const char *WIFI_PASSWORDS[] = {"pass1", "pass2"};
 const String API_BASE_URL = "https://example.com/api";
 const String API_SECRET = "YourSecretKeyHere";
-```
+````
 
 ### 3. Upload ke Board
 
 - Pastikan port USB terdeteksi
-- Compile dan upload seperti biasa via Arduino IDE
+- Compile dan upload via Arduino IDE
 
 ---
 
@@ -112,7 +105,6 @@ const String API_SECRET = "YourSecretKeyHere";
 5. Bila kartu valid → data dikirim ke API Laravel
 6. OLED menampilkan status (nama, waktu, hasil)
 7. Buzzer memberikan feedback suara
-8. Pada pukul 18.00–05.00 → perangkat masuk sleep mode otomatis
 
 ---
 
@@ -130,7 +122,7 @@ Response:
   {
     "message": "Presensi Berhasil",
     "data": {
-      "nama": "John Doe",
+      "nama": "Yahya Zulfikri",
       "waktu": "2025-07-17 07:30",
       "status": "Hadir"
     }
@@ -162,7 +154,7 @@ Proyek ini dilisensikan di bawah MIT License. Lihat file `LICENSE`.
 
 ## 👤 Author
 
-**Zulfikri Yahya**  
+**Zulfikri Yahya**
 📍 Indonesia
 
 ---
