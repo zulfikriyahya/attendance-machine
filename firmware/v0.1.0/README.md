@@ -114,7 +114,7 @@ Response:
 
 ## 🖼️ Diagram Koneksi
 
-![Schema](schema.svg)
+![Schema](v0.1.0.svg)
 
 ---
 
