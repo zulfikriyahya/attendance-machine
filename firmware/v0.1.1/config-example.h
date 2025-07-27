@@ -17,7 +17,6 @@ const char *WIFI_PASSWORDS[] = {"password123", "password123#"};
 const int WIFI_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
 const String API_BASE_URL = "https://example.com/api";
 const String API_SECRET = "YourSecretApiToken";
-// Multiple NTP servers untuk fallback
 const char *ntpServers[] = {
     "id.pool.ntp.org",    // Server Indonesia (prioritas)
     "time.google.com",    // Google time server

@@ -7,7 +7,6 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include "config.h"
-
 // RTC backup variables - tersimpan saat deep sleep
 RTC_DATA_ATTR time_t lastValidTime = 0;
 RTC_DATA_ATTR bool timeWasSet = false;
