@@ -17,7 +17,17 @@ const char *WIFI_PASSWORDS[] = {"password123", "password123#"};
 const int WIFI_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
 const String API_BASE_URL = "https://example.com/api";
 const String API_SECRET = "YourSecretApiToken";
-const char *ntpServer = "pool.ntp.org";
+// Multiple NTP servers untuk fallback
+const char *ntpServers[] = {
+    "id.pool.ntp.org",    // Server Indonesia (prioritas)
+    "time.google.com",    // Google time server
+    "pool.ntp.org",       // Pool NTP
+    "time.nist.gov",      // NIST time server
+    "time.cloudflare.com" // Cloudflare time server
+};
+const int NTP_SERVER_COUNT = 5;
+const int NTP_TIMEOUT = 8000;  // 8 detik timeout per server
+const int MAX_NTP_RETRIES = 2; // 2 retry per server
 const long gmtOffset_sec = 7 * 3600;
 const int daylightOffset_sec = 0;
 #endif
