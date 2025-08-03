@@ -24,11 +24,11 @@
 #define MISO 5
 #define MOSI 6
 
-const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE"};
-const char *WIFI_PASSWORDS[] = {"18012000", "18012000"};
+const char *WIFI_SSIDS[] = {"SSID1", "SSID2"};
+const char *WIFI_PASSWORDS[] = {"pass1", "pass2"};
 const int WIFI_COUNT = 2;
-const String API_BASE_URL = "http://10.213.19.72:8000/api";
-const String API_SECRET = "P@ndegl@ng_14012000*";
+const String API_BASE_URL = "https://example.com/api";
+const String API_SECRET = "password";
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 25200;
 const int daylightOffset_sec = 0;
