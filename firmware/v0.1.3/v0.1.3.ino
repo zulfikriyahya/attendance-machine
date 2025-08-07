@@ -28,7 +28,7 @@ const char *WIFI_SSIDS[] = {"SSID1", "SSID2", "SSID3"};
 const char *WIFI_PASSWORDS[] = {"pass1", "pass2", "pass3"};
 const int WIFI_COUNT = 3;
 const String API_BASE_URL = "https://example.com/api";
-const String API_SECRET = "password";
+const String API_SECRET = "SecretTokenApi";
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 25200;
 const int daylightOffset_sec = 0;
@@ -37,7 +37,7 @@ const int WIFI_TIMEOUT = 10000;
 const int HTTP_TIMEOUT = 10000;
 const int MAX_OFFLINE_RECORDS = 100;
 const int WATCHDOG_TIMEOUT = 30;
-const int SLEEP_HOUR_START = 18;
+const int SLEEP_HOUR_START = 22;
 const int SLEEP_HOUR_END = 5;
 
 bool sdSiap = false;
@@ -45,31 +45,24 @@ String lastUid = "";
 unsigned long lastScanTime = 0, lastWifiCheck = 0, lastSyncAttempt = 0, systemUptime = 0;
 int wifiReconnectCount = 0, apiErrorCount = 0;
 bool isDeepSleepMode = false;
-
 struct TapHistory {
   String rfid;
   unsigned long tapTime;
   String timestamp;
 };
-
 const int MAX_TAP_HISTORY = 50;
 TapHistory tapHistoryBuffer[MAX_TAP_HISTORY];
 int tapHistoryIndex = 0, tapHistoryCount = 0;
 const unsigned long MIN_TAP_INTERVAL = 1800000;
-
 enum SystemStatus { STATUS_INIT, STATUS_READY, STATUS_PROCESSING, STATUS_ERROR, STATUS_OFFLINE, STATUS_MAINTENANCE };
 SystemStatus currentStatus = STATUS_INIT;
-
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 MFRC522 rfid(SS_PIN, RST_PIN);
 HTTPClient http;
-
 struct SystemStats {
   unsigned long totalScans = 0, successfulSyncs = 0, failedSyncs = 0, wifiReconnects = 0, systemReboots = 0, uptime = 0;
 };
 SystemStats stats;
-
-// Variables for additional features
 unsigned long lastStatsReport = 0;
 unsigned long lastHealthCheck = 0;
 unsigned long lastJadwalUpdate = 0;
@@ -79,7 +72,7 @@ unsigned long lastDisplayChange = 0;
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("=== ZEDLABS Presensi System v0.1.3 ===");
+  Serial.println("=== ZEDLABS v0.1.3 ===");
   EEPROM.begin(512);
   loadSystemStats();
   stats.systemReboots++;
@@ -216,7 +209,7 @@ bool performAPIHealthCheck() {
   for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
     http.begin(API_BASE_URL + "/presensi/ping");
     http.addHeader("X-API-KEY", API_SECRET);
-    http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+    http.addHeader("User-Agent", "ZEDLABS/0.1.3");
     int httpCode = http.GET();
     http.end();
     if (httpCode == 200) {
@@ -243,7 +236,7 @@ bool validateRfid(String rfid) {
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   
   StaticJsonDocument<200> requestDoc;
   requestDoc["rfid"] = rfid;
@@ -273,7 +266,7 @@ String getStatusPresensi(String rfid) {
   http.begin(API_BASE_URL + "/presensi/status/" + rfid);
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   
   int httpCode = http.GET();
   String response = http.getString();
@@ -296,7 +289,7 @@ bool getJadwalHariIni() {
   http.begin(API_BASE_URL + "/presensi/jadwal");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   
   int httpCode = http.GET();
   String response = http.getString();
@@ -307,9 +300,9 @@ bool getJadwalHariIni() {
     DeserializationError error = deserializeJson(responseDoc, response);
     if (!error && responseDoc.containsKey("data")) {
       JsonObject data = responseDoc["data"];
-      String jamMasuk = data["jam_masuk"] | "08:00";
-      String jamKeluar = data["jam_keluar"] | "17:00";
-      jadwalInfo = "M:" + jamMasuk + " K:" + jamKeluar;
+      String jamMasuk = data["jam_datang"] | "07:15";
+      String jamKeluar = data["jam_pulang"] | "15:45";
+      jadwalInfo = "D:" + jamMasuk + " P:" + jamKeluar;
       return true;
     }
   }
@@ -337,7 +330,7 @@ int syncBulkData() {
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   
   StaticJsonDocument<4096> requestDoc;
   JsonArray bulkData = requestDoc.createNestedArray("data");
@@ -392,7 +385,7 @@ void sendDeviceStats() {
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   
   StaticJsonDocument<512> requestDoc;
   requestDoc["device_id"] = WiFi.macAddress();
@@ -436,7 +429,7 @@ bool performAdvancedHealthCheck() {
   http.begin(API_BASE_URL + "/presensi/health");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   
   int httpCode = http.GET();
   String response = http.getString();
@@ -950,7 +943,7 @@ bool kirimPresensi(String rfid, String &pesan, String &nama, String &status, Str
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   StaticJsonDocument<200> requestDoc;
   requestDoc["rfid"] = rfid;
   requestDoc["device_id"] = WiFi.macAddress();
@@ -989,7 +982,7 @@ bool simpanOfflineLog(String rfid, String originalTapTime) {
   newRecord["uid"] = rfid;
   newRecord["original_tap_time"] = originalTapTime;
   newRecord["created_at"] = getCurrentTimestamp();
-  newRecord["device_id"] = WiFi.macAddress();
+  // newRecord["device_id"] = WiFi.macAddress();
   newRecord["retry_count"] = 0;
   newRecord["signal_strength"] = WiFi.RSSI();
   newRecord["free_heap"] = ESP.getFreeHeap();
@@ -1025,7 +1018,7 @@ int kirimDataOffline() {
         failedRecord["uid"] = rfid;
         failedRecord["original_tap_time"] = originalTapTime;
         failedRecord["created_at"] = createdAt;
-        failedRecord["device_id"] = record["device_id"];
+        // failedRecord["device_id"] = record["device_id"];
         failedRecord["retry_count"] = retryCount + 1;
         failedRecord["signal_strength"] = record["signal_strength"];
         failedRecord["free_heap"] = record["free_heap"];
@@ -1052,7 +1045,7 @@ bool kirimPresensiWithTimestamp(String rfid, String originalTimestamp) {
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  http.addHeader("User-Agent", "ZEDLABS/0.1.3");
   StaticJsonDocument<300> requestDoc;
   requestDoc["rfid"] = rfid;
   requestDoc["device_id"] = WiFi.macAddress();
@@ -1101,7 +1094,7 @@ void createSystemDirectories() {
   if (!SD.exists("/system_info.txt")) {
     File sysInfo = SD.open("/system_info.txt", FILE_WRITE);
     if (sysInfo) {
-      sysInfo.println("ZEDLABS Presensi System v0.1.3");
+      sysInfo.println("ZEDLABS v0.1.3");
       sysInfo.println("Device MAC: " + WiFi.macAddress());
       sysInfo.println("Initialized: " + getCurrentTimestamp());
       sysInfo.close();
@@ -1273,7 +1266,7 @@ void showStartupAnimation() {
   String company = "ZEDLABS";
   String tagline1 = "INNOVATE BEYOND";
   String tagline2 = "LIMITS";
-  String version = "Presensi System v0.1.3";
+  String version = "v0.1.3";
   for (int x = -60; x <= (SCREEN_WIDTH - company.length() * 12) / 2; x += 3) {
     display.clearDisplay();
     display.setTextSize(2);
