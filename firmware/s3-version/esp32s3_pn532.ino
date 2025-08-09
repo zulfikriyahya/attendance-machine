@@ -13,10 +13,10 @@
 #define DEBOUNCE_TIME 300
 
 const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE", "WORKSHOP"};
-const char *WIFI_PASSWORDS[] = {"18012000", "18012000", "18012000"};
+const char *WIFI_PASSWORDS[] = {"pass1", "pass2", "pass3"};
 const int WIFI_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
-const String API_BASE_URL = "https://presensi.mtsn1pandeglang.sch.id/api";
-const String API_SECRET = "P@ndegl@ng_14012000*";
+const String API_BASE_URL = "https://example.com/api";
+const String API_SECRET = "SecretTokenApi";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_PN532 nfc(SDA_PIN, SCL_PIN);
