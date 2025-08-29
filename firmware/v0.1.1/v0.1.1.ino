@@ -6,619 +6,489 @@
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
 #include <time.h>
-#define RST_PIN 3
-#define SS_PIN 7
-#define SDA_PIN 8
-#define SCL_PIN 9
-#define BUZZER_PIN 10
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define DEBOUNCE_TIME 300
+
+#define RST 3
+#define SS 7
+#define SDA 8
+#define SCL 9
+#define BUZ 10
+#define SW 128
+#define SH 64
+#define DEB 300
 #define SCK 4
-#define MISO 5
-#define MOSI 6
-const char *WIFI_SSIDS[] = { "ssid1", "ssid2" };
-const char *WIFI_PASSWORDS[] = { "pass1", "pass2" };
-const int WIFI_COUNT = sizeof(WIFI_SSIDS) / sizeof(WIFI_SSIDS[0]);
-const String API_BASE_URL = "https://example.com/api";
-const String API_SECRET = "SecretTokenApi";
-const char *ntpServers[] = {
-  "pool.ntp.org",
-  "time.google.com",
-  "id.pool.ntp.org",
-  "time.nist.gov",
-  "time.cloudflare.com"
-};
-const int NTP_SERVER_COUNT = 5;
-const int NTP_TIMEOUT = 8000;
-const int MAX_NTP_RETRIES = 2;
-const int START_SLEEP = 18;
-const int END_SLEEP = 1;
-const long gmtOffset_sec = 7 * 3600;
-const int daylightOffset_sec = 0;
-// RTC backup variables - tersimpan saat deep sleep
-RTC_DATA_ATTR time_t lastValidTime = 0;
-RTC_DATA_ATTR bool timeWasSet = false;
-RTC_DATA_ATTR unsigned long bootTime = 0;
+#define MSO 5
+#define MSI 6
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-MFRC522 rfid(SS_PIN, RST_PIN);
-String lastUid = "";
-unsigned long lastScanTime = 0;
+const char WS1[] PROGMEM = "ZEDLABS";
+const char WS2[] PROGMEM = "ZULFIKRIYAHYA";
+const char WP1[] PROGMEM = "Password1";
+const char WP2[] PROGMEM = "Password2";
+const char API[] PROGMEM = "https://presensi.example.sch.id/api";
+const char KEY[] PROGMEM = "SecretApi"; # Sesuaikan dengan API SECRET pada .env
+const char NT1[] PROGMEM = "pool.ntp.org";
+const char NT2[] PROGMEM = "time.google.com";
+const char NT3[] PROGMEM = "id.pool.ntp.org";
+const char NT4[] PROGMEM = "time.nist.gov";
+const char NT5[] PROGMEM = "time.cloudflare.com";
 
-// Fungsi untuk sync waktu dengan multiple fallback
+const int WCT = 2;
+const int NCT = 5;
+const int NTO = 8000;
+const int MNR = 2;
+const int SST = 18; # Mulai Sleep Mode
+const int EST = 5; # Selesai Sleep Mode
+const long GMT = 25200;
+const int DST = 0;
+
+RTC_DATA_ATTR time_t lvt = 0;
+RTC_DATA_ATTR bool tws = false;
+RTC_DATA_ATTR unsigned long bt = 0;
+
+Adafruit_SSD1306 dsp(SW, SH, &Wire, -1);
+MFRC522 rfd(SS, RST);
+
+char luid[11] = "";
+unsigned long lst = 0;
+char buf[64];
+
 bool syncTimeWithFallback() {
-  Serial.println("=== MEMULAI SINKRONISASI WAKTU ===");
-
-  for (int serverIdx = 0; serverIdx < NTP_SERVER_COUNT; serverIdx++) {
-    Serial.printf("Mencoba server [%d/%d]: %s\n", serverIdx + 1, NTP_SERVER_COUNT, ntpServers[serverIdx]);
-
-    // Set konfigurasi NTP
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServers[serverIdx]);
-
-    // Retry untuk server saat ini
-    for (int retry = 0; retry < MAX_NTP_RETRIES; retry++) {
-      Serial.printf("  Percobaan %d/%d...\n", retry + 1, MAX_NTP_RETRIES);
-
-      // Update display
-      showOLED("SYNC WAKTU", "Server " + String(serverIdx + 1) + "/" + String(NTP_SERVER_COUNT));
-
-      struct tm timeinfo;
-      unsigned long startTime = millis();
-      bool timeReceived = false;
-
-      // Tunggu dengan timeout
-      while ((millis() - startTime) < NTP_TIMEOUT) {
-        if (getLocalTime(&timeinfo)) {
-          // Validasi waktu - tahun harus > 2020
-          if (timeinfo.tm_year >= 120) {
-            timeReceived = true;
+  for (int si = 0; si < NCT; si++) {
+    char nts[32];
+    switch(si) {
+      case 0: strcpy_P(nts, NT1); break;
+      case 1: strcpy_P(nts, NT2); break;
+      case 2: strcpy_P(nts, NT3); break;
+      case 3: strcpy_P(nts, NT4); break;
+      case 4: strcpy_P(nts, NT5); break;
+    }
+    configTime(GMT, DST, nts);
+    for (int r = 0; r < MNR; r++) {
+      snprintf_P(buf, sizeof(buf), PSTR("Server %d/%d"), si + 1, NCT);
+      showOLED(F("SYNC WAKTU"), buf);
+      struct tm ti;
+      unsigned long st = millis();
+      bool tr = false;
+      while ((millis() - st) < NTO) {
+        if (getLocalTime(&ti)) {
+          if (ti.tm_year >= 120) {
+            tr = true;
             break;
           }
         }
         delay(100);
-
-        // Update progress setiap detik
-        if ((millis() - startTime) % 1000 == 0) {
-          int progress = ((millis() - startTime) * 100) / NTP_TIMEOUT;
-          Serial.printf("    Progress: %d%%\n", progress);
-        }
       }
-
-      if (timeReceived) {
-        // Sukses mendapatkan waktu valid
-        lastValidTime = mktime(&timeinfo);
-        timeWasSet = true;
-        bootTime = millis();
-
-        Serial.printf("✓ WAKTU BERHASIL DISYNC!\n");
-        Serial.printf("  Tanggal: %04d-%02d-%02d\n",
-                      timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday);
-        Serial.printf("  Waktu: %02d:%02d:%02d\n",
-                      timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-        Serial.printf("  Server: %s\n", ntpServers[serverIdx]);
-
-        showOLED("WAKTU TERSYNC", String(timeinfo.tm_hour) + ":" + (timeinfo.tm_min < 10 ? "0" : "") + String(timeinfo.tm_min));
+      if (tr) {
+        lvt = mktime(&ti);
+        tws = true;
+        bt = millis();
+        snprintf(buf, sizeof(buf), "%02d:%02d", ti.tm_hour, ti.tm_min);
+        showOLED(F("WAKTU TERSYNC"), buf);
         delay(1500);
         return true;
       }
-
-      Serial.printf("  ✗ Timeout setelah %d detik\n", NTP_TIMEOUT / 1000);
-      delay(500);  // Jeda sebelum retry
+      delay(500);
     }
-
-    Serial.printf("✗ Server %s gagal setelah %d percobaan\n",
-                  ntpServers[serverIdx], MAX_NTP_RETRIES);
   }
-
-  Serial.println("✗ SEMUA SERVER NTP GAGAL!");
   return false;
 }
 
-// Fungsi untuk mendapatkan waktu dengan fallback ke estimasi
-bool getTimeWithFallback(struct tm* timeinfo) {
-  // Coba ambil waktu dari sistem dulu
-  if (getLocalTime(timeinfo)) {
-    if (timeinfo->tm_year >= 120) {  // Validasi tahun > 2020
+bool getTimeWithFallback(struct tm* ti) {
+  if (getLocalTime(ti)) {
+    if (ti->tm_year >= 120) {
       return true;
     }
   }
-
-  // Jika gagal dan ada waktu backup, gunakan estimasi
-  if (timeWasSet && lastValidTime > 0) {
-    Serial.println("Menggunakan estimasi waktu dari backup RTC");
-    unsigned long elapsedSeconds = (millis() - bootTime) / 1000;
-    time_t estimatedTime = lastValidTime + elapsedSeconds;
-    *timeinfo = *localtime(&estimatedTime);
-
-    Serial.printf("Estimasi waktu: %02d:%02d:%02d\n",
-                  timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+  if (tws && lvt > 0) {
+    unsigned long es = (millis() - bt) / 1000;
+    time_t et = lvt + es;
+    *ti = *localtime(&et);
     return true;
   }
-
-  Serial.println("Tidak ada waktu backup tersedia");
   return false;
 }
 
-// Periodic time sync - panggil setiap 1 jam
-void periodicTimeSync() {
-  static unsigned long lastSyncAttempt = 0;
-  const unsigned long SYNC_INTERVAL = 3600000;  // 1 jam = 3600000 ms
-
-  if (millis() - lastSyncAttempt > SYNC_INTERVAL) {
-    lastSyncAttempt = millis();
-
+inline void periodicTimeSync() {
+  static unsigned long lsa = 0;
+  const unsigned long SI = 3600000UL;
+  if (millis() - lsa > SI) {
+    lsa = millis();
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\n=== PERIODIC TIME SYNC ===");
-      if (syncTimeWithFallback()) {
-        Serial.println("Periodic sync berhasil");
-      } else {
-        Serial.println("Periodic sync gagal, menggunakan estimasi");
-      }
-    } else {
-      Serial.println("Periodic sync dilewati - WiFi tidak terhubung");
+      syncTimeWithFallback();
     }
   }
 }
 
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("\n=== SISTEM PRESENSI RFID ===");
-  Serial.println("ESP32-C3 Super Mini Version");
-
-  Wire.begin(SDA_PIN, SCL_PIN);
-  pinMode(BUZZER_PIN, OUTPUT);
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("OLED gagal diinisialisasi!");
-    fatalError("OLED GAGAL");
-  }
-
+  Wire.begin(SDA, SCL);
+  pinMode(BUZ, OUTPUT);
+  dsp.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   showStartupAnimation();
   playStartupMelody();
-
-  // Koneksi WiFi
+  
   if (!connectToWiFi()) {
-    Serial.println("WiFi gagal terhubung!");
-    fatalError("WIFI GAGAL");
+    fatalError(F("WIFI GAGAL"));
   }
-
-  // Test API
-  showProgress("PING API", 2000);
-  int apiRetryCount = 0;
+  showProgress(F("PING API"), 2000);
+  int arc = 0;
   while (!pingAPI()) {
-    apiRetryCount++;
-    Serial.printf("API ping gagal (percobaan %d)\n", apiRetryCount);
-    showOLED("API GAGAL", "PERCOBAAN " + String(apiRetryCount));
+    arc++;
+    snprintf_P(buf, sizeof(buf), PSTR("PERCOBAAN %d"), arc);
+    showOLED(F("API GAGAL"), buf);
     playToneError();
     delay(2000);
-
-    if (apiRetryCount >= 5) {
-      Serial.println("API tidak dapat dijangkau setelah 5 percobaan");
-      fatalError("API TIDAK TERSEDIA");
+    if (arc >= 5) {
+      fatalError(F("API TIDAK TERSEDIA"));
     }
   }
-
-  showOLED("API TERHUBUNG", "SINKRONISASI WAKTU");
+  showOLED(F("API TERHUBUNG"), F("SINKRONISASI WAKTU"));
   playToneSuccess();
-
-  // Sinkronisasi waktu dengan fallback
-  Serial.println("\n=== INISIALISASI WAKTU ===");
+  
   if (!syncTimeWithFallback()) {
-    // Jika NTP gagal, cek apakah ada backup time
-    struct tm timeinfo;
-    if (!getTimeWithFallback(&timeinfo)) {
-      Serial.println("PERINGATAN: Tidak ada waktu yang tersedia!");
-      showOLED("PERINGATAN", "WAKTU TIDAK TERSEDIA");
+    struct tm ti;
+    if (!getTimeWithFallback(&ti)) {
+      showOLED(F("PERINGATAN"), F("WAKTU TIDAK TERSEDIA"));
       playToneError();
       delay(3000);
-
-      // Sistem tetap jalan tapi tanpa fitur sleep otomatis
-      showOLED("MODE MANUAL", "TANPA AUTO SLEEP");
+      showOLED(F("MODE MANUAL"), F("TANPA AUTO SLEEP"));
       delay(2000);
     } else {
-      Serial.println("Menggunakan waktu estimasi dari backup");
-      showOLED("WAKTU ESTIMASI", "AKURASI TERBATAS");
+      showOLED(F("WAKTU ESTIMASI"), F("AKURASI TERBATAS"));
       playToneError();
       delay(2000);
     }
   }
-
-  // Inisialisasi RFID
-  Serial.println("\n=== INISIALISASI RFID ===");
-  SPI.begin(SCK, MISO, MOSI, SS_PIN);
-  rfid.PCD_Init();
+  
+  SPI.begin(SCK, MSO, MSI, SS);
+  rfd.PCD_Init();
   delay(100);
-
-  // Test RFID module
-  byte version = rfid.PCD_ReadRegister(rfid.VersionReg);
-  Serial.printf("MFRC522 Version: 0x%02X\n", version);
-
-  if (version == 0x00 || version == 0xFF) {
-    Serial.println("MFRC522 tidak terdeteksi!");
-    fatalError("RC522 TIDAK TERDETEKSI");
+  byte ver = rfd.PCD_ReadRegister(rfd.VersionReg);
+  if (ver == 0x00 || ver == 0xFF) {
+    fatalError(F("RC522 TIDAK TERDETEKSI"));
   }
-
-  Serial.println("MFRC522 berhasil diinisialisasi");
-
-  // Sistem siap
-  showOLED("SISTEM SIAP", "TEMPELKAN KARTU");
+  showOLED(F("SISTEM SIAP"), F("TEMPELKAN KARTU"));
   playToneSuccess();
-  Serial.println("\n=== SISTEM SIAP DIGUNAKAN ===\n");
-
-  // Simpan waktu boot untuk estimasi
-  bootTime = millis();
+  bt = millis();
 }
 
 void loop() {
-  // Periodic time sync setiap 1 jam
   periodicTimeSync();
-
-  // Deteksi kartu RFID
-  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-    String rfidStr = uidToString(rfid.uid.uidByte, rfid.uid.size);
-
-    // Debounce protection
-    if (rfidStr == lastUid && millis() - lastScanTime < DEBOUNCE_TIME) {
-      rfid.PICC_HaltA();
-      rfid.PCD_StopCrypto1();
+  
+  if (rfd.PICC_IsNewCardPresent() && rfd.PICC_ReadCardSerial()) {
+    uidToString(rfd.uid.uidByte, rfd.uid.size, buf);
+    if (strcmp(buf, luid) == 0 && millis() - lst < DEB) {
+      rfd.PICC_HaltA();
+      rfd.PCD_StopCrypto1();
       return;
     }
-
-    lastUid = rfidStr;
-    lastScanTime = millis();
-
-    Serial.println("🏷️  RFID Terdeteksi: " + rfidStr);
-    showOLED("RFID TERDETEKSI", rfidStr);
+    strcpy(luid, buf);
+    lst = millis();
+    showOLED(F("RFID TERDETEKSI"), buf);
     playToneNotify();
     delay(50);
-
-    // Kirim ke server
-    String pesan, nama, status, waktu;
-    bool sukses = kirimPresensi(rfidStr, pesan, nama, status, waktu);
-
-    // Tampilkan hasil
-    showOLED(sukses ? "BERHASIL" : "GAGAL", pesan);
-
-    if (sukses) {
-      Serial.println("✓ Presensi berhasil: " + pesan);
+    
+    char psn[32], nm[32], sts[16], wkt[16];
+    bool sks = kirimPresensi(buf, psn, nm, sts, wkt);
+    showOLED(sks ? F("BERHASIL") : F("INFO"), psn);
+    if (sks) {
       playToneSuccess();
     } else {
-      Serial.println("✗ Presensi gagal: " + pesan);
       playToneError();
     }
-
     delay(150);
-
-    // Reset RFID
-    rfid.PICC_HaltA();
-    rfid.PCD_StopCrypto1();
+    rfd.PICC_HaltA();
+    rfd.PCD_StopCrypto1();
   }
-
-  // Tampilkan standby screen
+  
   showStandbySignal();
   delay(80);
-
-  // Auto sleep mode (hanya jika waktu tersedia)
-  struct tm timeinfo;
-  if (getTimeWithFallback(&timeinfo)) {
-    int jam = timeinfo.tm_hour;
-
-    // Sleep mode jam 18:00 - 05:00
-    if (jam >= START_SLEEP || jam < END_SLEEP) {
-      Serial.printf("Memasuki sleep mode pada jam %02d:%02d\n",
-                    timeinfo.tm_hour, timeinfo.tm_min);
-
-      showOLED("SLEEP MODE", "SAMPAI PAGI");
+  
+  struct tm ti;
+  if (getTimeWithFallback(&ti)) {
+    int jm = ti.tm_hour;
+    if (jm >= SST || jm < EST) {
+      showOLED(F("SLEEP MODE"), F("SAMPAI PAGI"));
       delay(2000);
-
-      // Hitung durasi sleep
-      int detikSisa;
-      if (jam >= START_SLEEP) {
-        // Tidur sampai jam 5 pagi
-        detikSisa = ((24 - jam + END_SLEEP) * 3600) - (timeinfo.tm_min * 60 + timeinfo.tm_sec);
+      int ds;
+      if (jm >= SST) {
+        ds = ((24 - jm + EST) * 3600) - (ti.tm_min * 60 + ti.tm_sec);
       } else {
-        // Tidur sampai jam 5 (jika sekarang masih dini hari)
-        detikSisa = ((END_SLEEP - jam) * 3600) - (timeinfo.tm_min * 60 + timeinfo.tm_sec);
+        ds = ((EST - jm) * 3600) - (ti.tm_min * 60 + ti.tm_sec);
       }
-
-      Serial.printf("Sleep duration: %d detik (%d jam %d menit)\n",
-                    detikSisa, detikSisa / 3600, (detikSisa % 3600) / 60);
-
-      uint64_t sleepDuration = (uint64_t)detikSisa * 1000000ULL;
-      esp_sleep_enable_timer_wakeup(sleepDuration);
-
-      Serial.println("Memasuki deep sleep...");
+      uint64_t sd = (uint64_t)ds * 1000000ULL;
+      esp_sleep_enable_timer_wakeup(sd);
       esp_deep_sleep_start();
     }
   }
 }
 
 void showStandbySignal() {
-  display.clearDisplay();
-  String title = "TEMPELKAN KARTU";
+  dsp.clearDisplay();
+  const __FlashStringHelper* ttl = F("TEMPELKAN KARTU");
   int16_t x1, y1;
   uint16_t w1, h1;
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.getTextBounds(title, 0, 0, &x1, &y1, &w1, &h1);
-  display.setCursor((SCREEN_WIDTH - w1) / 2, 20);
-  display.println(title);
-
-  // Tampilkan waktu jika tersedia
-  struct tm timeinfo;
-  if (getTimeWithFallback(&timeinfo)) {
-    String timeStr = String(timeinfo.tm_hour) + ":" + (timeinfo.tm_min < 10 ? "0" : "") + String(timeinfo.tm_min);
-    display.getTextBounds(timeStr, 0, 0, &x1, &y1, &w1, &h1);
-    display.setCursor((SCREEN_WIDTH - w1) / 2, 35);
-    display.println(timeStr);
+  dsp.setTextSize(1);
+  dsp.setTextColor(WHITE);
+  dsp.getTextBounds(ttl, 0, 0, &x1, &y1, &w1, &h1);
+  dsp.setCursor((SW - w1) / 2, 20);
+  dsp.println(ttl);
+  
+  struct tm ti;
+  if (getTimeWithFallback(&ti)) {
+    snprintf(buf, sizeof(buf), "%02d:%02d", ti.tm_hour, ti.tm_min);
+    dsp.getTextBounds(buf, 0, 0, &x1, &y1, &w1, &h1);
+    dsp.setCursor((SW - w1) / 2, 35);
+    dsp.println(buf);
   }
-
-  // WiFi signal indicator
+  
   if (WiFi.status() == WL_CONNECTED) {
-    long rssi = WiFi.RSSI();
-    int bars = 0;
-    if (rssi > -67) bars = 4;
-    else if (rssi > -70) bars = 3;
-    else if (rssi > -80) bars = 2;
-    else if (rssi > -90) bars = 1;
-    else bars = 0;
-
-    int baseX = SCREEN_WIDTH - 18, barWidth = 3, spacing = 2;
+    long rsi = WiFi.RSSI();
+    int brs = (rsi > -67) ? 4 : (rsi > -70) ? 3 : (rsi > -80) ? 2 : (rsi > -90) ? 1 : 0;
+    const int bx = SW - 18, bw = 3, sp = 2;
     for (int i = 0; i < 4; i++) {
-      int barHeight = 2 + i * 2, x = baseX + i * (barWidth + spacing), y = 10 - barHeight;
-      if (i < bars) display.fillRect(x, y, barWidth, barHeight, WHITE);
-      else display.drawRect(x, y, barWidth, barHeight, WHITE);
+      int bh = 2 + i * 2, x = bx + i * (bw + sp), y = 10 - bh;
+      if (i < brs) dsp.fillRect(x, y, bw, bh, WHITE);
+      else dsp.drawRect(x, y, bw, bh, WHITE);
     }
   } else {
-    // WiFi disconnected indicator
-    display.setCursor(SCREEN_WIDTH - 20, 2);
-    display.println("X");
+    dsp.setCursor(SW - 20, 2);
+    dsp.println(F("X"));
   }
-
-  display.display();
+  dsp.display();
 }
 
-void fatalError(String p) {
-  Serial.println("FATAL ERROR: " + p);
-  showOLED(p, "RESTART...");
+void fatalError(const __FlashStringHelper* p) {
+  showOLED(p, F("RESTART..."));
   playToneError();
   delay(3000);
   ESP.restart();
 }
 
 bool connectToWiFi() {
-  Serial.println("=== KONEKSI WIFI ===");
   WiFi.mode(WIFI_STA);
-
-  for (int i = 0; i < WIFI_COUNT; i++) {
-    Serial.printf("Mencoba WiFi [%d/%d]: %s\n", i + 1, WIFI_COUNT, WIFI_SSIDS[i]);
-    WiFi.begin(WIFI_SSIDS[i], WIFI_PASSWORDS[i]);
-
+  for (int i = 0; i < WCT; i++) {
+    char sid[16], pwd[16];
+    if (i == 0) {
+      strcpy_P(sid, WS1);
+      strcpy_P(pwd, WP1);
+    } else {
+      strcpy_P(sid, WS2);
+      strcpy_P(pwd, WP2);
+    }
+    WiFi.begin(sid, pwd);
     for (int r = 0; r < 20 && WiFi.status() != WL_CONNECTED; r++) {
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setTextColor(WHITE);
-
-      String s = WIFI_SSIDS[i];
-      display.setCursor((SCREEN_WIDTH - s.length() * 6) / 2, 10);
-      display.println(s);
-
-      int d = r % 4;
-      String l = "MENGHUBUNGKAN";
-      display.setCursor((SCREEN_WIDTH - l.length() * 6) / 2, 30);
-      display.print(l);
-      for (int j = 0; j < d; j++) display.print(".");
-
-      display.display();
+      dsp.clearDisplay();
+      dsp.setTextSize(1);
+      dsp.setTextColor(WHITE);
+      dsp.setCursor((SW - strlen(sid) * 6) / 2, 10);
+      dsp.println(sid);
+      const char ldg[] = "MENGHUBUNGKAN";
+      int dts = r % 4;
+      dsp.setCursor((SW - strlen(ldg) * 6) / 2, 30);
+      dsp.print(ldg);
+      for (int j = 0; j < dts; j++) dsp.print('.');
+      dsp.display();
       delay(300);
     }
-
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("✓ WiFi terhubung ke: %s\n", WIFI_SSIDS[i]);
-      Serial.printf("  IP Address: %s\n", WiFi.localIP().toString().c_str());
-      Serial.printf("  RSSI: %d dBm\n", WiFi.RSSI());
-
-      showOLED("WIFI TERHUBUNG", WiFi.localIP().toString());
+      WiFi.localIP().toString().toCharArray(buf, sizeof(buf));
+      showOLED(F("WIFI TERHUBUNG"), buf);
       delay(2000);
       return true;
     }
-
-    Serial.printf("✗ Gagal terhubung ke: %s\n", WIFI_SSIDS[i]);
   }
-
-  Serial.println("✗ Semua WiFi gagal!");
   return false;
 }
 
 bool pingAPI() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi tidak terhubung untuk ping API");
-    return false;
-  }
-
-  HTTPClient http;
-  http.setTimeout(10000);  // 10 detik timeout
-  http.begin(API_BASE_URL + "/presensi/ping");
-  http.addHeader("X-API-KEY", API_SECRET);
-
-  Serial.println("Ping API: " + API_BASE_URL + "/presensi/ping");
-  int code = http.GET();
-  String response = http.getString();
-  http.end();
-
-  Serial.printf("API Response: %d - %s\n", code, response.c_str());
-  return code == 200;
+  if (WiFi.status() != WL_CONNECTED) return false;
+  HTTPClient htp;
+  htp.setTimeout(10000);
+  char url[80];
+  strcpy_P(url, API);
+  strcat_P(url, PSTR("/presensi/ping"));
+  htp.begin(url);
+  char apk[32];
+  strcpy_P(apk, KEY);
+  htp.addHeader(F("X-API-KEY"), apk);
+  int cde = htp.GET();
+  htp.end();
+  return cde == 200;
 }
 
-String uidToString(uint8_t* uid, uint8_t len) {
-  char b[11];
+void uidToString(uint8_t* uid, uint8_t len, char* out) {
   if (len >= 4) {
-    uint32_t v = (uid[3] << 24) | (uid[2] << 16) | (uid[1] << 8) | uid[0];
-    sprintf(b, "%010lu", v);
+    uint32_t v = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) | ((uint32_t)uid[1] << 8) | uid[0];
+    sprintf(out, "%010lu", v);
   } else {
-    sprintf(b, "%02X%02X", uid[0], uid[1]);
+    sprintf(out, "%02X%02X", uid[0], uid[1]);
   }
-  return String(b);
 }
 
-bool kirimPresensi(String rfid, String& pesan, String& nama, String& status, String& waktu) {
+bool kirimPresensi(const char* rfd, char* psn, char* nm, char* sts, char* wkt) {
   if (WiFi.status() != WL_CONNECTED) {
-    pesan = "TIDAK ADA WIFI";
-    Serial.println("Gagal kirim presensi: WiFi tidak terhubung");
+    strcpy_P(psn, PSTR("TIDAK ADA WIFI"));
     return false;
   }
-
-  HTTPClient http;
-  http.setTimeout(15000);  // 15 detik timeout
-  http.begin(API_BASE_URL + "/presensi/rfid");
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Accept", "application/json");
-  http.addHeader("X-API-KEY", API_SECRET);
-
-  String payload = "{\"rfid\":\"" + rfid + "\"}";
-  Serial.println("Mengirim payload: " + payload);
-
-  int code = http.POST(payload);
-  String res = http.getString();
-  http.end();
-
-  Serial.printf("API Response [%d]:\n%s\n", code, res.c_str());
-
-  // Parse JSON response
-  StaticJsonDocument<512> doc;
-  DeserializationError error = deserializeJson(doc, res);
-
-  if (error) {
-    pesan = "RESPON TIDAK VALID";
-    Serial.println("JSON parsing error: " + String(error.c_str()));
+  HTTPClient htp;
+  htp.setTimeout(30000);
+  char url[80];
+  strcpy_P(url, API);
+  strcat_P(url, PSTR("/presensi/rfid"));
+  htp.begin(url);
+  htp.addHeader(F("Content-Type"), F("application/json"));
+  htp.addHeader(F("Accept"), F("application/json"));
+  char apk[32];
+  strcpy_P(apk, KEY);
+  htp.addHeader(F("X-API-KEY"), apk);
+  char pld[64];
+  snprintf_P(pld, sizeof(pld), PSTR("{\"rfid\":\"%s\"}"), rfd);
+  int cde = htp.POST(pld);
+  String res = htp.getString();
+  htp.end();
+  
+  DynamicJsonDocument doc(256);
+  DeserializationError err = deserializeJson(doc, res);
+  if (err) {
+    strcpy_P(psn, PSTR("ULANGI !"));
     return false;
   }
-
-  pesan = doc["message"] | "TERJADI KESALAHAN";
-
-  if (code == 200 && doc.containsKey("data")) {
+  
+  const char* msg = doc["message"] | "TERJADI KESALAHAN";
+  strncpy(psn, msg, 31);
+  psn[31] = '\0';
+  
+  if (cde == 200 && doc.containsKey("data")) {
     JsonObject d = doc["data"];
-    nama = d["nama"] | "-";
-    waktu = d["waktu"] | "-";
-    status = d["statusPulang"] | d["status"] | "-";
-
-    Serial.println("Presensi berhasil - Nama: " + nama + ", Status: " + status);
+    const char* n = d["nama"] | "-";
+    const char* w = d["waktu"] | "-";
+    const char* s = d["statusPulang"] | d["status"] | "-";
+    strncpy(nm, n, 31); nm[31] = '\0';
+    strncpy(wkt, w, 15); wkt[15] = '\0';
+    strncpy(sts, s, 15); sts[15] = '\0';
     return true;
   }
-
-  Serial.println("Presensi gagal: " + pesan);
   return false;
 }
 
-void showOLED(String l1, String l2) {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-
-  l1.toUpperCase();
-  l2.toUpperCase();
-
+void showOLED(const __FlashStringHelper* l1, const char* l2) {
+  dsp.clearDisplay();
+  dsp.setTextSize(1);
+  dsp.setTextColor(WHITE);
   int16_t x1, y1;
   uint16_t w1, h1;
-
-  display.getTextBounds(l1, 0, 0, &x1, &y1, &w1, &h1);
-  display.setCursor((SCREEN_WIDTH - w1) / 2, 10);
-  display.println(l1);
-
-  display.getTextBounds(l2, 0, 0, &x1, &y1, &w1, &h1);
-  display.setCursor((SCREEN_WIDTH - w1) / 2, 30);
-  display.println(l2);
-
-  display.display();
+  dsp.getTextBounds(l1, 0, 0, &x1, &y1, &w1, &h1);
+  dsp.setCursor((SW - w1) / 2, 10);
+  dsp.println(l1);
+  dsp.getTextBounds(l2, 0, 0, &x1, &y1, &w1, &h1);
+  dsp.setCursor((SW - w1) / 2, 30);
+  dsp.println(l2);
+  dsp.display();
 }
 
-void playToneSuccess() {
+void showOLED(const __FlashStringHelper* l1, const __FlashStringHelper* l2) {
+  dsp.clearDisplay();
+  dsp.setTextSize(1);
+  dsp.setTextColor(WHITE);
+  int16_t x1, y1;
+  uint16_t w1, h1;
+  dsp.getTextBounds(l1, 0, 0, &x1, &y1, &w1, &h1);
+  dsp.setCursor((SW - w1) / 2, 10);
+  dsp.println(l1);
+  dsp.getTextBounds(l2, 0, 0, &x1, &y1, &w1, &h1);
+  dsp.setCursor((SW - w1) / 2, 30);
+  dsp.println(l2);
+  dsp.display();
+}
+
+inline void playToneSuccess() {
   for (int i = 0; i < 2; i++) {
-    tone(BUZZER_PIN, 1000, 100);
+    tone(BUZ, 3000, 100);
     delay(150);
   }
-  noTone(BUZZER_PIN);
+  noTone(BUZ);
 }
 
-void playToneError() {
+inline void playToneError() {
   for (int i = 0; i < 3; i++) {
-    tone(BUZZER_PIN, 800, 150);
+    tone(BUZ, 3500, 150);
     delay(200);
   }
-  noTone(BUZZER_PIN);
+  noTone(BUZ);
 }
 
-void playToneNotify() {
-  tone(BUZZER_PIN, 1200, 100);
+inline void playToneNotify() {
+  tone(BUZ, 2500, 100);
   delay(120);
-  noTone(BUZZER_PIN);
+  noTone(BUZ);
 }
 
 void playStartupMelody() {
-  int melody[] = { 1000, 1200, 1000, 1200 };
+  const int mld[] PROGMEM = { 2500, 3000, 2500, 3000 };
   for (int i = 0; i < 4; i++) {
-    tone(BUZZER_PIN, melody[i], 100);
+    tone(BUZ, pgm_read_word_near(mld + i), 100);
     delay(150);
   }
-  noTone(BUZZER_PIN);
+  noTone(BUZ);
 }
 
-void showProgress(String m, int t) {
-  int step = 8, dps = t / (SCREEN_WIDTH / step), x = (SCREEN_WIDTH - 80) / 2;
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor((SCREEN_WIDTH - m.length() * 6) / 2, 20);
-  display.println(m);
-  display.display();
-
-  for (int i = 0; i <= 80; i += step) {
-    display.fillRect(x, 40, i, 4, WHITE);
-    display.display();
+void showProgress(const __FlashStringHelper* m, int t) {
+  const int stp = 8, pw = 80;
+  int dps = t / (pw / stp), x = (SW - pw) / 2;
+  dsp.clearDisplay();
+  dsp.setTextSize(1);
+  dsp.setTextColor(WHITE);
+  int16_t x1, y1;
+  uint16_t w1, h1;
+  dsp.getTextBounds(m, 0, 0, &x1, &y1, &w1, &h1);
+  dsp.setCursor((SW - w1) / 2, 20);
+  dsp.println(m);
+  dsp.display();
+  for (int i = 0; i <= pw; i += stp) {
+    dsp.fillRect(x, 40, i, 4, WHITE);
+    dsp.display();
     delay(dps);
   }
   delay(500);
 }
 
 void showStartupAnimation() {
-  display.clearDisplay();
-  display.setTextColor(WHITE);
-  String j = "ZEDLABS", s = "INNOVATE BEYOND", s2 = "LIMITS", l = "Starting";
-  int xj = (SCREEN_WIDTH - (j.length() * 12)) / 2, xs = (SCREEN_WIDTH - (s.length() * 6)) / 2,
-      xs2 = (SCREEN_WIDTH - (s2.length() * 6)) / 2, xl = (SCREEN_WIDTH - (l.length() * 6)) / 2;
-
+  dsp.clearDisplay();
+  dsp.setTextColor(WHITE);
+  const char ttl[] PROGMEM = "ZEDLABS";
+  const char st1[] PROGMEM = "INNOVATE BEYOND";
+  const char st2[] PROGMEM = "LIMITS";
+  const char ldg[] PROGMEM = "STARTING v0.1.1";
+  const int tln = 7;
+  const int xj = (SW - (tln * 12)) / 2;
+  const int xs = (SW - 15 * 6) / 2;
+  const int xs2 = (SW - 6 * 6) / 2;
+  const int xl = (SW - 15 * 6) / 2;
+  
   for (int x = -80; x <= xj; x += 4) {
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setCursor(x, 5);
-    display.println(j);
-
-    display.setTextSize(1);
-    display.setCursor(xs, 30);
-    display.println(s);
-    display.setCursor(xs2, 40);
-    display.println(s2);
-
-    display.display();
+    dsp.clearDisplay();
+    dsp.setTextSize(2);
+    dsp.setCursor(x, 5);
+    dsp.println((__FlashStringHelper*)ttl);
+    dsp.setTextSize(1);
+    dsp.setCursor(xs, 30);
+    dsp.println((__FlashStringHelper*)st1);
+    dsp.setCursor(xs2, 40);
+    dsp.println((__FlashStringHelper*)st2);
+    dsp.display();
     delay(30);
   }
-
   delay(300);
-  display.setTextSize(1);
-  display.setCursor(xl, 55);
-  display.print(l);
-  display.display();
-
+  dsp.setTextSize(1);
+  dsp.setCursor(xl, 55);
+  dsp.print((__FlashStringHelper*)ldg);
+  dsp.display();
   for (int i = 0; i < 3; i++) {
     delay(300);
-    display.print(".");
-    display.display();
+    dsp.print('.');
+    dsp.display();
   }
-
-  showProgress("MENYIAPKAN", 2000);
+  showProgress(F("MENYIAPKAN"), 2000);
   delay(1000);
-  display.clearDisplay();
-  display.display();
+  dsp.clearDisplay();
+  dsp.display();
 }
