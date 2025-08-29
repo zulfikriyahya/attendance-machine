@@ -13,19 +13,6 @@ Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yan
 
 ---
 
-## 🚀 Daftar Isi
-
-- [Fitur Utama](#fitur-utama)
-- [Perbedaan Versi Firmware](#perbedaan-versi-firmware)
-- [Komponen Hardware](#komponen-hardware)
-- [Cara Kerja](#cara-kerja)
-- [Instalasi & Flash Firmware](#instalasi--flash-firmware)
-- [Konfigurasi `config.h`](#konfigurasi-configh)
-- [Integrasi Laravel API](#integrasi-laravel-api)
-- [Lisensi & Kontribusi](#lisensi--kontribusi)
-
----
-
 ## ✨ Fitur Utama
 
 - 🔐 **RFID Presensi** (RC522 / PN532)
