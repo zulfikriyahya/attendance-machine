@@ -10,16 +10,20 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 MFRC522 rfid(SS_PIN, RST_PIN);
 String lastUid = "";
 unsigned long lastScanTime = 0;
-void setup() {
+void setup()
+{
   Serial.begin(115200);
   Wire.begin(SDA_PIN, SCL_PIN);
   pinMode(BUZZER_PIN, OUTPUT);
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) fatalError("OLED GAGAL");
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+    fatalError("OLED GAGAL");
   showStartupAnimation();
   playStartupMelody();
-  if (!connectToWiFi()) fatalError("WIFI GAGAL");
+  if (!connectToWiFi())
+    fatalError("WIFI GAGAL");
   showProgress("PING API", 2000);
-  while (!pingAPI()) {
+  while (!pingAPI())
+  {
     showOLED("API GAGAL", "MENGULANG...");
     playToneError();
     delay(2000);
@@ -31,12 +35,16 @@ void setup() {
   rfid.PCD_Init();
   delay(4);
   byte version = rfid.PCD_ReadRegister(rfid.VersionReg);
-  if (version == 0x00 || version == 0xFF) fatalError("RC522 TIDAK TERDETEKSI");
+  if (version == 0x00 || version == 0xFF)
+    fatalError("RC522 TIDAK TERDETEKSI");
 }
-void loop() {
-  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+void loop()
+{
+  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
+  {
     String rfidStr = uidToString(rfid.uid.uidByte, rfid.uid.size);
-    if (rfidStr == lastUid && millis() - lastScanTime < DEBOUNCE_TIME) return;
+    if (rfidStr == lastUid && millis() - lastScanTime < DEBOUNCE_TIME)
+      return;
     lastUid = rfidStr;
     lastScanTime = millis();
     Serial.println("\xF0\x9F\x93\xB1 RFID: " + rfidStr);
@@ -46,8 +54,10 @@ void loop() {
     String pesan, nama, status, waktu;
     bool sukses = kirimPresensi(rfidStr, pesan, nama, status, waktu);
     showOLED(sukses ? "BERHASIL" : "GAGAL", pesan);
-    if (sukses) playToneSuccess();
-    else playToneError();
+    if (sukses)
+      playToneSuccess();
+    else
+      playToneError();
     delay(150);
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
@@ -55,7 +65,8 @@ void loop() {
   showStandbySignal();
   delay(80);
 }
-void showStandbySignal() {
+void showStandbySignal()
+{
   display.clearDisplay();
   String title = "TEMPELKAN KARTU";
   int16_t x1, y1;
@@ -67,28 +78,40 @@ void showStandbySignal() {
   display.println(title);
   long rssi = WiFi.RSSI();
   int bars = 0;
-  if (rssi > -67) bars = 4;
-  else if (rssi > -70) bars = 3;
-  else if (rssi > -80) bars = 2;
-  else if (rssi > -90) bars = 1;
-  else bars = 0;
+  if (rssi > -67)
+    bars = 4;
+  else if (rssi > -70)
+    bars = 3;
+  else if (rssi > -80)
+    bars = 2;
+  else if (rssi > -90)
+    bars = 1;
+  else
+    bars = 0;
   int baseX = SCREEN_WIDTH - 18, barWidth = 3, spacing = 2;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4; i++)
+  {
     int barHeight = 2 + i * 2, x = baseX + i * (barWidth + spacing), y = 10 - barHeight;
-    if (i < bars) display.fillRect(x, y, barWidth, barHeight, WHITE);
-    else display.drawRect(x, y, barWidth, barHeight, WHITE);
+    if (i < bars)
+      display.fillRect(x, y, barWidth, barHeight, WHITE);
+    else
+      display.drawRect(x, y, barWidth, barHeight, WHITE);
   }
   display.display();
 }
-void fatalError(String p) {
+void fatalError(String p)
+{
   showOLED(p, "RESTART...");
   delay(3000);
   ESP.restart();
 }
-bool connectToWiFi() {
-  for (int i = 0; i < WIFI_COUNT; i++) {
+bool connectToWiFi()
+{
+  for (int i = 0; i < WIFI_COUNT; i++)
+  {
     WiFi.begin(WIFI_SSIDS[i], WIFI_PASSWORDS[i]);
-    for (int r = 0; r < 20 && WiFi.status() != WL_CONNECTED; r++) {
+    for (int r = 0; r < 20 && WiFi.status() != WL_CONNECTED; r++)
+    {
       display.clearDisplay();
       display.setTextSize(1);
       display.setTextColor(WHITE);
@@ -99,11 +122,13 @@ bool connectToWiFi() {
       String l = "MENGHUBUNGKAN";
       display.setCursor((SCREEN_WIDTH - l.length() * 6) / 2, 30);
       display.print(l);
-      for (int j = 0; j < d; j++) display.print(".");
+      for (int j = 0; j < d; j++)
+        display.print(".");
       display.display();
       delay(300);
     }
-    if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED)
+    {
       showOLED("WIFI TERHUBUNG", WiFi.localIP().toString());
       delay(2000);
       return true;
@@ -111,8 +136,10 @@ bool connectToWiFi() {
   }
   return false;
 }
-bool pingAPI() {
-  if (WiFi.status() != WL_CONNECTED) return false;
+bool pingAPI()
+{
+  if (WiFi.status() != WL_CONNECTED)
+    return false;
   HTTPClient http;
   http.begin(API_BASE_URL + "/presensi/ping");
   http.addHeader("X-API-KEY", API_SECRET);
@@ -120,16 +147,22 @@ bool pingAPI() {
   http.end();
   return code == 200;
 }
-String uidToString(uint8_t* uid, uint8_t len) {
+String uidToString(uint8_t *uid, uint8_t len)
+{
   char b[11];
-  if (len >= 4) {
+  if (len >= 4)
+  {
     uint32_t v = (uid[3] << 24) | (uid[2] << 16) | (uid[1] << 8) | uid[0];
     sprintf(b, "%010lu", v);
-  } else sprintf(b, "%02X%02X", uid[0], uid[1]);
+  }
+  else
+    sprintf(b, "%02X%02X", uid[0], uid[1]);
   return String(b);
 }
-bool kirimPresensi(String rfid, String& pesan, String& nama, String& status, String& waktu) {
-  if (WiFi.status() != WL_CONNECTED) {
+bool kirimPresensi(String rfid, String &pesan, String &nama, String &status, String &waktu)
+{
+  if (WiFi.status() != WL_CONNECTED)
+  {
     pesan = "TIDAK ADA WIFI";
     return false;
   }
@@ -144,12 +177,14 @@ bool kirimPresensi(String rfid, String& pesan, String& nama, String& status, Str
   http.end();
   Serial.println("RESPON API:\n" + res);
   StaticJsonDocument<512> doc;
-  if (deserializeJson(doc, res)) {
+  if (deserializeJson(doc, res))
+  {
     pesan = "RESPON TIDAK VALID (JSON)";
     return false;
   }
   pesan = doc["message"] | "TERJADI KESALAHAN";
-  if (code == 200 && doc.containsKey("data")) {
+  if (code == 200 && doc.containsKey("data"))
+  {
     JsonObject d = doc["data"];
     nama = d["nama"] | "-";
     waktu = d["waktu"] | "-";
@@ -158,7 +193,8 @@ bool kirimPresensi(String rfid, String& pesan, String& nama, String& status, Str
   }
   return false;
 }
-void showOLED(String l1, String l2) {
+void showOLED(String l1, String l2)
+{
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -174,33 +210,40 @@ void showOLED(String l1, String l2) {
   display.println(l2);
   display.display();
 }
-void playToneSuccess() {
-  for (int i = 0; i < 2; i++) {
+void playToneSuccess()
+{
+  for (int i = 0; i < 2; i++)
+  {
     tone(BUZZER_PIN, 1000, 100);
     delay(150);
   }
   noTone(BUZZER_PIN);
 }
-void playToneError() {
-  for (int i = 0; i < 3; i++) {
+void playToneError()
+{
+  for (int i = 0; i < 3; i++)
+  {
     tone(BUZZER_PIN, 1000, 100);
     delay(150);
   }
   noTone(BUZZER_PIN);
 }
-void playToneNotify() {
+void playToneNotify()
+{
   tone(BUZZER_PIN, 1000, 100);
   delay(120);
   noTone(BUZZER_PIN);
 }
-void playStartupMelody() {
+void playStartupMelody()
+{
   tone(BUZZER_PIN, 1000, 100);
   delay(150);
   tone(BUZZER_PIN, 1000, 100);
   delay(150);
   noTone(BUZZER_PIN);
 }
-void showProgress(String m, int t) {
+void showProgress(String m, int t)
+{
   int step = 8, dps = t / (SCREEN_WIDTH / step), x = (SCREEN_WIDTH - 80) / 2;
   display.clearDisplay();
   display.setTextSize(1);
@@ -208,19 +251,22 @@ void showProgress(String m, int t) {
   display.setCursor((SCREEN_WIDTH - m.length() * 6) / 2, 20);
   display.println(m);
   display.display();
-  for (int i = 0; i <= 80; i += step) {
+  for (int i = 0; i <= 80; i += step)
+  {
     display.fillRect(x, 40, i, 4, WHITE);
     display.display();
     delay(dps);
   }
   delay(500);
 }
-void showStartupAnimation() {
+void showStartupAnimation()
+{
   display.clearDisplay();
   display.setTextColor(WHITE);
   String j = "ZEDLABS", s = "INNOVATE BEYOND", s2 = "LIMITS", l = "Starting";
   int xj = (SCREEN_WIDTH - (j.length() * 12)) / 2, xs = (SCREEN_WIDTH - (s.length() * 6)) / 2, xs2 = (SCREEN_WIDTH - (s2.length() * 6)) / 2, xl = (SCREEN_WIDTH - (l.length() * 6)) / 2;
-  for (int x = -80; x <= xj; x += 4) {
+  for (int x = -80; x <= xj; x += 4)
+  {
     display.clearDisplay();
     display.setTextSize(2);
     display.setCursor(x, 5);
@@ -238,7 +284,8 @@ void showStartupAnimation() {
   display.setCursor(xl, 55);
   display.print(l);
   display.display();
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 3; i++)
+  {
     delay(300);
     display.print(".");
     display.display();

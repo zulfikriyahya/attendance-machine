@@ -10,7 +10,6 @@ Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yan
 | ------ | ------------------------------------- |
 | v0.1.0 | ![v0.1.0](firmware/v0.1.0/v0.1.0.svg) |
 | v0.1.1 | ![v0.1.1](firmware/v0.1.1/v0.1.1.svg) |
-| v0.1.2 | ![v0.1.2](firmware/v0.1.2/v0.1.2.svg) |
 
 ---
 
@@ -35,7 +34,7 @@ Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yan
 - 💬 **Notifikasi WhatsApp** – Ke orang tua/pegawai
 - 💾 **Offline Mode** – Sinkron otomatis saat online
 - 📈 **Anti-Dobel Scan** (debounce + timestamp)
-- 🔋 **Portable** – Bisa pakai baterai BL-5C / Li-ion
+- 🔋 **Portable** – Bisa pakai baterai BL-5C / Li-ion / Baterai 18650
 - 🖥️ **OLED Display** – Tampilkan nama, waktu, dan status
 - 🔊 **Buzzer Aktif** – Feedback audio
 - 🔧 **Tanpa Reset/Instalasi Ulang** – Plug & play
@@ -45,11 +44,11 @@ Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yan
 
 ## 🧪 Perbedaan Versi Firmware
 
-| Versi  | Deskripsi Singkat                                     |
-| ------ | ----------------------------------------------------- |
-| v0.1.0 | Firmware dasar: scan RFID, kirim API, tampilkan OLED  |
-| v0.1.1 | Tambahan: sleep mode otomatis di luar jam operasional |
-| v0.1.2 | Tambahan: auto-sync data offline saat online kembali  |
+| Versi  | Deskripsi Singkat                                     |Catatan                            |
+| ------ | ----------------------------------------------------- |-----------------------------------|
+| v0.1.0 | Firmware dasar: scan RFID, kirim API, tampilkan OLED  |Public Release                     |
+| v0.1.1 | Tambahan: sleep mode otomatis di luar jam operasional |Public Release                     |
+| v0.1.2 | Tambahan: auto-sync data offline saat online kembali  |Hanya Untuk MTs Negeri 1 Pandeglang|
 
 ---
 
@@ -102,10 +101,26 @@ Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yan
 #define RST_PIN 3
 #define SS_PIN 7
 ...
-const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE"};
-const char *WIFI_PASSWORDS[] = {"pass1", "pass2"};
-const String API_BASE_URL = "https://example.com/api";
-const String API_SECRET = "YourSecretKeyHere";
+const char WS1[] PROGMEM = "ZEDLABS";                             // SSID Wifi 1
+const char WS2[] PROGMEM = "ZULFIKRIYAHYA";                       // SSID Wifi 2 (Opsional)
+const char WP1[] PROGMEM = "Password1";                           // Password Wifi 1
+const char WP2[] PROGMEM = "Password2";                           // Password Wifi 2 (Opsional)
+const char API[] PROGMEM = "https://presensi.example.sch.id/api"; // Sesuaikan dengan APP_URL pada.env
+const char KEY[] PROGMEM = "SecretApi";                           // Sesuaikan dengan API_SECRET pada.env
+const char NT1[] PROGMEM = "pool.ntp.org";
+const char NT2[] PROGMEM = "time.google.com";
+const char NT3[] PROGMEM = "id.pool.ntp.org";
+const char NT4[] PROGMEM = "time.nist.gov";
+const char NT5[] PROGMEM = "time.cloudflare.com";
+
+const int WCT = 2;
+const int NCT = 5;
+const int NTO = 8000;
+const int MNR = 2;
+const int SST = 18; // Mulai Sleep Mode
+const int EST = 5;  // Selesai Sleep Mode
+const long GMT = 25200;
+const int DST = 0;
 ```
 
 ---
