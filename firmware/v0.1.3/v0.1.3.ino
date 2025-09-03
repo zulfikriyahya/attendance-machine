@@ -24,21 +24,21 @@
 #define MISO 5
 #define MOSI 6
 
-const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE"};
-const char *WIFI_PASSWORDS[] = {"18012000", "18012000"};
-const int WIFI_COUNT = 2;
-const String API_BASE_URL = "http://10.213.19.72:8000/api";
+const char *WIFI_SSIDS[] = {"ZEDLABS", "LINE", "WORKSHOP"};
+const char *WIFI_PASSWORDS[] = {"18012000", "18012000", "18012000"};
+const int WIFI_COUNT = 3;
+const String API_BASE_URL = "https://presensi.mtsn1pandeglang.sch.id/api";
 const String API_SECRET = "P@ndegl@ng_14012000*";
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 25200;
 const int daylightOffset_sec = 0;
 const int MAX_RETRY_ATTEMPTS = 3;
-const int WIFI_TIMEOUT = 20000;
+const int WIFI_TIMEOUT = 10000;
 const int HTTP_TIMEOUT = 10000;
 const int MAX_OFFLINE_RECORDS = 100;
 const int WATCHDOG_TIMEOUT = 30;
 const int SLEEP_HOUR_START = 18;
-const int SLEEP_HOUR_END = 3;
+const int SLEEP_HOUR_END = 5;
 
 bool sdSiap = false;
 String lastUid = "";
@@ -69,9 +69,17 @@ struct SystemStats {
 };
 SystemStats stats;
 
+// Variables for additional features
+unsigned long lastStatsReport = 0;
+unsigned long lastHealthCheck = 0;
+unsigned long lastJadwalUpdate = 0;
+String jadwalInfo = "";
+int displayMode = 0; // 0=standby, 1=jadwal, 2=stats, 3=info
+unsigned long lastDisplayChange = 0;
+
 void setup() {
   Serial.begin(115200);
-  Serial.println("=== ZEDLABS Presensi System v0.1.2 ===");
+  Serial.println("=== ZEDLABS Presensi System v0.1.3 ===");
   EEPROM.begin(512);
   loadSystemStats();
   stats.systemReboots++;
@@ -93,15 +101,41 @@ void setup() {
 
 void loop() {
   unsigned long currentTime = millis();
+  
+  // Update uptime stats
   if (currentTime - systemUptime > 60000) {
     stats.uptime++;
     systemUptime = currentTime;
     saveSystemStats();
   }
-  if (shouldEnterSleepMode()) { enterSleepMode(); return; }
+  
+  // Check sleep mode
+  if (shouldEnterSleepMode()) { 
+    enterSleepMode(); 
+    return; 
+  }
+  
+  // Perform maintenance
   performPeriodicMaintenance(currentTime);
+  
+  // Periodic stats reporting
+  periodicStatsReport(currentTime);
+  
+  // Periodic health check
+  periodicHealthCheck(currentTime);
+  
+  // Update jadwal periodically
+  updateJadwalPeriodically(currentTime);
+  
+  // Handle display rotation
+  handleDisplayRotation(currentTime);
+  
+  // Process RFID
   processRFIDCard();
+  
+  // Update display
   updateDisplay();
+  
   delay(50);
 }
 
@@ -117,11 +151,11 @@ void initializeHardware() {
 
 void initializeStorage() {
   int attempts = 0;
-  while (attempts < MAX_RETRY_ATTEMPTS && !SD.begin(SD_CS)) { attempts++; delay(1000); }
+  while (attempts < MAX_RETRY_ATTEMPTS && !SD.begin(SD_CS)) { attempts++; delay(700); }
   if (attempts >= MAX_RETRY_ATTEMPTS) {
     sdSiap = false;
     showOLED("WARNING", "NO SD CARD");
-    delay(2000);
+    delay(700);
   } else {
     sdSiap = true;
     createSystemDirectories();
@@ -168,7 +202,7 @@ bool connectToWiFi() {
     if (WiFi.status() == WL_CONNECTED) {
       showOLED("WIFI CONNECTED", WiFi.localIP().toString());
       playToneSuccess();
-      delay(2000);
+      delay(700);
       return true;
     }
   }
@@ -182,29 +216,367 @@ bool performAPIHealthCheck() {
   for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
     http.begin(API_BASE_URL + "/presensi/ping");
     http.addHeader("X-API-KEY", API_SECRET);
-    http.addHeader("User-Agent", "ZEDLABS-Presensi/0.1.2");
+    http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
     int httpCode = http.GET();
     http.end();
     if (httpCode == 200) {
       showOLED("API ONLINE", "SYSTEM READY");
       playToneSuccess();
-      delay(1000);
+      delay(700);
       return true;
     }
-    delay(2000);
+    delay(700);
   }
   showOLED("API WARNING", "OFFLINE MODE");
   playToneError();
-  delay(2000);
+  delay(700);
   return false;
+}
+
+// NEW FUNCTIONS - Additional API integrations
+
+bool validateRfid(String rfid) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  
+  http.setTimeout(HTTP_TIMEOUT);
+  http.begin(API_BASE_URL + "/presensi/validate");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("X-API-KEY", API_SECRET);
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  
+  StaticJsonDocument<200> requestDoc;
+  requestDoc["rfid"] = rfid;
+  requestDoc["device_id"] = WiFi.macAddress();
+  
+  String payload;
+  serializeJson(requestDoc, payload);
+  
+  int httpCode = http.POST(payload);
+  String response = http.getString();
+  http.end();
+  
+  if (httpCode == 200) {
+    StaticJsonDocument<512> responseDoc;
+    DeserializationError error = deserializeJson(responseDoc, response);
+    if (!error && responseDoc["valid"].as<bool>()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+String getStatusPresensi(String rfid) {
+  if (WiFi.status() != WL_CONNECTED) return "OFFLINE";
+  
+  http.setTimeout(HTTP_TIMEOUT);
+  http.begin(API_BASE_URL + "/presensi/status/" + rfid);
+  http.addHeader("Accept", "application/json");
+  http.addHeader("X-API-KEY", API_SECRET);
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  
+  int httpCode = http.GET();
+  String response = http.getString();
+  http.end();
+  
+  if (httpCode == 200) {
+    StaticJsonDocument<512> responseDoc;
+    DeserializationError error = deserializeJson(responseDoc, response);
+    if (!error) {
+      return responseDoc["status"] | "UNKNOWN";
+    }
+  }
+  return "ERROR";
+}
+
+bool getJadwalHariIni() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  
+  http.setTimeout(HTTP_TIMEOUT);
+  http.begin(API_BASE_URL + "/presensi/jadwal");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("X-API-KEY", API_SECRET);
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  
+  int httpCode = http.GET();
+  String response = http.getString();
+  http.end();
+  
+  if (httpCode == 200) {
+    StaticJsonDocument<1024> responseDoc;
+    DeserializationError error = deserializeJson(responseDoc, response);
+    if (!error && responseDoc.containsKey("data")) {
+      JsonObject data = responseDoc["data"];
+      String jamMasuk = data["jam_masuk"] | "08:00";
+      String jamKeluar = data["jam_keluar"] | "17:00";
+      jadwalInfo = "M:" + jamMasuk + " K:" + jamKeluar;
+      return true;
+    }
+  }
+  return false;
+}
+
+int syncBulkData() {
+  if (!sdSiap || WiFi.status() != WL_CONNECTED) return 0;
+  
+  File file = SD.open("/offline.json", FILE_READ);
+  if (!file) return 0;
+  
+  StaticJsonDocument<4096> doc;
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+  
+  if (error || !doc.is<JsonArray>()) return 0;
+  
+  JsonArray dataArray = doc.as<JsonArray>();
+  if (dataArray.size() == 0) return 0;
+  
+  // Prepare bulk request
+  http.setTimeout(HTTP_TIMEOUT * 2); // Longer timeout for bulk
+  http.begin(API_BASE_URL + "/presensi/sync-bulk");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("X-API-KEY", API_SECRET);
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  
+  StaticJsonDocument<4096> requestDoc;
+  JsonArray bulkData = requestDoc.createNestedArray("data");
+  
+  // Add device info
+  requestDoc["device_id"] = WiFi.macAddress();
+  requestDoc["sync_timestamp"] = getCurrentTimestamp();
+  
+  // Copy offline records to bulk request
+  for (JsonObject record : dataArray) {
+    JsonObject bulkRecord = bulkData.createNestedObject();
+    bulkRecord["rfid"] = record["uid"];
+    bulkRecord["timestamp"] = record["original_tap_time"];
+    bulkRecord["device_timestamp"] = record["created_at"];
+    bulkRecord["retry_count"] = record["retry_count"];
+  }
+  
+  String payload;
+  serializeJson(requestDoc, payload);
+  
+  int httpCode = http.POST(payload);
+  String response = http.getString();
+  http.end();
+  
+  if (httpCode == 200) {
+    StaticJsonDocument<1024> responseDoc;
+    DeserializationError error = deserializeJson(responseDoc, response);
+    if (!error) {
+      int syncedCount = responseDoc["synced_count"] | 0;
+      
+      // Clear offline data if successfully synced
+      if (syncedCount > 0) {
+        file = SD.open("/offline.json", FILE_WRITE);
+        if (file) {
+          file.print("[]");
+          file.close();
+        }
+      }
+      
+      return syncedCount;
+    }
+  }
+  
+  return 0;
+}
+
+void sendDeviceStats() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  
+  http.setTimeout(HTTP_TIMEOUT);
+  http.begin(API_BASE_URL + "/presensi/device/stats");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("X-API-KEY", API_SECRET);
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  
+  StaticJsonDocument<512> requestDoc;
+  requestDoc["device_id"] = WiFi.macAddress();
+  requestDoc["timestamp"] = getCurrentTimestamp();
+  requestDoc["stats"]["total_scans"] = stats.totalScans;
+  requestDoc["stats"]["successful_syncs"] = stats.successfulSyncs;
+  requestDoc["stats"]["failed_syncs"] = stats.failedSyncs;
+  requestDoc["stats"]["wifi_reconnects"] = stats.wifiReconnects;
+  requestDoc["stats"]["system_reboots"] = stats.systemReboots;
+  requestDoc["stats"]["uptime_minutes"] = stats.uptime;
+  requestDoc["hardware"]["free_heap"] = ESP.getFreeHeap();
+  requestDoc["hardware"]["signal_strength"] = WiFi.RSSI();
+  requestDoc["hardware"]["sd_available"] = sdSiap;
+  requestDoc["network"]["wifi_ssid"] = WiFi.SSID();
+  requestDoc["network"]["local_ip"] = WiFi.localIP().toString();
+  
+  // Get SD card stats if available
+  if (sdSiap) {
+    requestDoc["storage"]["card_size_mb"] = SD.cardSize() / (1024 * 1024);
+    requestDoc["storage"]["used_bytes_mb"] = SD.usedBytes() / (1024 * 1024);
+  }
+  
+  String payload;
+  serializeJson(requestDoc, payload);
+  
+  int httpCode = http.POST(payload);
+  http.end();
+  
+  // Log the stats transmission result
+  if (httpCode == 200) {
+    Serial.println("Device stats sent successfully");
+  } else {
+    Serial.printf("Failed to send device stats: %d\n", httpCode);
+  }
+}
+
+bool performAdvancedHealthCheck() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  
+  http.setTimeout(HTTP_TIMEOUT);
+  http.begin(API_BASE_URL + "/presensi/health");
+  http.addHeader("Accept", "application/json");
+  http.addHeader("X-API-KEY", API_SECRET);
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
+  
+  int httpCode = http.GET();
+  String response = http.getString();
+  http.end();
+  
+  if (httpCode == 200) {
+    StaticJsonDocument<512> responseDoc;
+    DeserializationError error = deserializeJson(responseDoc, response);
+    if (!error) {
+      String serverStatus = responseDoc["status"] | "unknown";
+      String dbStatus = responseDoc["database"] | "unknown";
+      
+      if (serverStatus == "ok" && dbStatus == "connected") {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+// NEW PERIODIC FUNCTIONS
+
+void periodicStatsReport(unsigned long currentTime) {
+  const unsigned long STATS_REPORT_INTERVAL = 3600000; // 1 hour
+  
+  if (currentTime - lastStatsReport > STATS_REPORT_INTERVAL) {
+    if (WiFi.status() == WL_CONNECTED) {
+      sendDeviceStats();
+    }
+    lastStatsReport = currentTime;
+  }
+}
+
+void periodicHealthCheck(unsigned long currentTime) {
+  const unsigned long HEALTH_CHECK_INTERVAL = 1800000; // 30 minutes
+  
+  if (currentTime - lastHealthCheck > HEALTH_CHECK_INTERVAL) {
+    if (WiFi.status() == WL_CONNECTED) {
+      performAdvancedHealthCheck();
+    }
+    lastHealthCheck = currentTime;
+  }
+}
+
+void updateJadwalPeriodically(unsigned long currentTime) {
+  const unsigned long JADWAL_UPDATE_INTERVAL = 21600000; // 6 hours
+  
+  if (currentTime - lastJadwalUpdate > JADWAL_UPDATE_INTERVAL) {
+    if (WiFi.status() == WL_CONNECTED) {
+      getJadwalHariIni();
+    }
+    lastJadwalUpdate = currentTime;
+  }
+}
+
+void handleDisplayRotation(unsigned long currentTime) {
+  const unsigned long DISPLAY_CHANGE_INTERVAL = 10000; // 10 seconds
+  
+  if (currentStatus == STATUS_READY && (currentTime - lastDisplayChange) > DISPLAY_CHANGE_INTERVAL) {
+    displayMode = (displayMode + 1) % 4; // Rotate through 0-3
+    lastDisplayChange = currentTime;
+  }
+}
+
+// DISPLAY FUNCTIONS
+
+void showJadwalInfo() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  
+  display.setCursor((SCREEN_WIDTH - 12 * 6) / 2, 5);
+  display.println("JADWAL HARI INI");
+  
+  if (jadwalInfo.length() > 0) {
+    display.setCursor((SCREEN_WIDTH - jadwalInfo.length() * 6) / 2, 25);
+    display.println(jadwalInfo);
+  } else {
+    display.setCursor((SCREEN_WIDTH - 15 * 6) / 2, 25);
+    display.println("TIDAK TERSEDIA");
+  }
+  
+  // Show current time
+  String currentTime = getCurrentTime();
+  display.setCursor((SCREEN_WIDTH - currentTime.length() * 6) / 2, 40);
+  display.println(currentTime);
+  
+  drawStatusIndicators();
+  display.display();
+}
+
+void showDeviceStats() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  
+  display.setCursor(0, 0);
+  display.println("DEVICE STATISTICS");
+  display.setCursor(0, 15);
+  display.printf("Scans: %lu", stats.totalScans);
+  display.setCursor(0, 25);
+  display.printf("Syncs: %lu/%lu", stats.successfulSyncs, stats.failedSyncs);
+  display.setCursor(0, 35);
+  display.printf("WiFi: %lu reconnects", stats.wifiReconnects);
+  display.setCursor(0, 45);
+  display.printf("Uptime: %lu min", stats.uptime);
+  display.setCursor(0, 55);
+  display.printf("Memory: %d bytes", ESP.getFreeHeap());
+  
+  display.display();
+}
+
+void showSystemInfo() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  
+  display.setCursor(0, 0);
+  display.println("SYSTEM INFO");
+  display.setCursor(0, 15);
+  display.printf("MAC: %s", WiFi.macAddress().substring(12).c_str());
+  display.setCursor(0, 25);
+  display.printf("IP: %s", WiFi.localIP().toString().c_str());
+  display.setCursor(0, 35);
+  display.printf("RSSI: %d dBm", WiFi.RSSI());
+  display.setCursor(0, 45);
+  display.printf("API Errors: %d", apiErrorCount);
+  display.setCursor(0, 55);
+  display.printf("Version: 0.1.3");
+  
+  display.display();
 }
 
 void initializeTimeSync() {
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   int attempts = 0;
   struct tm timeinfo;
-  while (!getLocalTime(&timeinfo) && attempts < 10) { delay(1000); attempts++; }
-  if (attempts >= 10) { showOLED("TIME SYNC", "FAILED"); delay(2000); }
+  while (!getLocalTime(&timeinfo) && attempts < 10) { delay(700); attempts++; }
+  if (attempts >= 10) { showOLED("TIME SYNC", "FAILED"); delay(700); }
 }
 
 void initializeRFID() {
@@ -219,19 +591,44 @@ void initializeRFID() {
 void performInitialSync() {
   if (!sdSiap || WiFi.status() != WL_CONNECTED) return;
   showProgress("SYNCING OFFLINE DATA", 3000);
-  int syncedRecords = kirimDataOffline();
-  if (syncedRecords > 0) { showOLED("SYNC COMPLETE", String(syncedRecords) + " RECORDS"); delay(2000); }
+  
+  // Try bulk sync first
+  int syncedRecords = syncBulkData();
+  
+  // If bulk sync fails, try individual sync
+  if (syncedRecords == 0) {
+    syncedRecords = kirimDataOffline();
+  }
+  
+  if (syncedRecords > 0) { 
+    showOLED("SYNC COMPLETE", String(syncedRecords) + " RECORDS"); 
+    delay(700); 
+  }
+  
+  // Get initial jadwal
+  getJadwalHariIni();
 }
 
 void performPeriodicMaintenance(unsigned long currentTime) {
-  if (currentTime - lastWifiCheck > 30000) { checkWiFiConnection(); lastWifiCheck = currentTime; }
+  // WiFi check
+  if (currentTime - lastWifiCheck > 30000) { 
+    checkWiFiConnection(); 
+    lastWifiCheck = currentTime; 
+  }
+  
+  // Sync check - try bulk sync first
   if (currentTime - lastSyncAttempt > 300000) {
     if (sdSiap && WiFi.status() == WL_CONNECTED) {
-      int synced = kirimDataOffline();
+      int synced = syncBulkData();
+      if (synced == 0) {
+        synced = kirimDataOffline(); // Fallback to individual sync
+      }
       if (synced > 0) stats.successfulSyncs++;
     }
     lastSyncAttempt = currentTime;
   }
+  
+  // Memory cleanup
   static unsigned long lastCleanup = 0;
   if (currentTime - lastCleanup > 600000) {
     performMemoryCleanup();
@@ -369,18 +766,34 @@ void processAttendance(String rfidStr) {
   String pesan, nama, status, waktu;
   bool success = false;
   unsigned long currentTime = millis();
+  
+  // Check for recent tap first
   if (isRecentTap(rfidStr, currentTime)) {
     showOLED("TAP DITOLAK", "TUNGGU 30 MENIT");
     playToneError();
     if (sdSiap) logRejectedTap(rfidStr, getCurrentTimestamp(), "DUPLICATE TAP < 30MIN");
-    delay(3000);
+    delay(700);
     return;
   }
+  
+  // Validate RFID if online
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!validateRfid(rfidStr)) {
+      showOLED("RFID TIDAK VALID", "KARTU TIDAK TERDAFTAR");
+      playToneError();
+      if (sdSiap) logRejectedTap(rfidStr, getCurrentTimestamp(), "INVALID RFID");
+      delay(700);
+      return;
+    }
+  }
+  
+  // Process attendance
   if (WiFi.status() == WL_CONNECTED) {
     success = kirimPresensi(rfidStr, pesan, nama, status, waktu);
     if (success) { stats.successfulSyncs++; apiErrorCount = 0; }
     else { apiErrorCount++; stats.failedSyncs++; }
   }
+  
   if (success) {
     showSuccessMessage(nama, status, waktu);
     playToneSuccess();
@@ -443,7 +856,7 @@ bool shouldEnterSleepMode() {
 
 void enterSleepMode() {
   showOLED("SLEEP MODE", "UNTIL MORNING");
-  delay(2000);
+  delay(700);
   saveSystemStats();
   struct tm timeinfo;
   getLocalTime(&timeinfo);
@@ -460,7 +873,21 @@ void updateDisplay() {
   static unsigned long lastUpdate = 0;
   unsigned long currentTime = millis();
   if (currentStatus == STATUS_READY && (currentTime - lastUpdate) > 2000) {
-    showStandbySignal();
+    // Display rotation based on displayMode
+    switch (displayMode) {
+      case 0:
+        showStandbySignal();
+        break;
+      case 1:
+        showJadwalInfo();
+        break;
+      case 2:
+        showDeviceStats();
+        break;
+      case 3:
+        showSystemInfo();
+        break;
+    }
     lastUpdate = currentTime;
   }
 }
@@ -523,7 +950,7 @@ bool kirimPresensi(String rfid, String &pesan, String &nama, String &status, Str
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi/0.1.2");
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
   StaticJsonDocument<200> requestDoc;
   requestDoc["rfid"] = rfid;
   requestDoc["device_id"] = WiFi.macAddress();
@@ -625,7 +1052,7 @@ bool kirimPresensiWithTimestamp(String rfid, String originalTimestamp) {
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   http.addHeader("X-API-KEY", API_SECRET);
-  http.addHeader("User-Agent", "ZEDLABS-Presensi/0.1.2");
+  http.addHeader("User-Agent", "ZEDLABS-Presensi-System/0.1.3");
   StaticJsonDocument<300> requestDoc;
   requestDoc["rfid"] = rfid;
   requestDoc["device_id"] = WiFi.macAddress();
@@ -674,7 +1101,7 @@ void createSystemDirectories() {
   if (!SD.exists("/system_info.txt")) {
     File sysInfo = SD.open("/system_info.txt", FILE_WRITE);
     if (sysInfo) {
-      sysInfo.println("ZEDLABS Presensi System v0.1.2");
+      sysInfo.println("ZEDLABS Presensi System v0.1.3");
       sysInfo.println("Device MAC: " + WiFi.macAddress());
       sysInfo.println("Initialized: " + getCurrentTimestamp());
       sysInfo.close();
@@ -694,7 +1121,7 @@ void checkSDCardHealth() {
   uint64_t usedBytes = SD.usedBytes() / (1024 * 1024);
   if (usedBytes > (cardSize * 0.9)) {
     showOLED("SD WARNING", "STORAGE FULL");
-    delay(3000);
+    delay(700);
     cleanupOldLogs();
   }
 }
@@ -777,7 +1204,7 @@ void showSystemReady() {
   display.printf("SD: %s API: %s", sdSiap ? "OK" : "--", (apiErrorCount == 0) ? "OK" : "ERR");
   display.display();
   playToneSuccess();
-  delay(3000);
+  delay(700);
 }
 
 void handleCriticalError(String errorMessage) {
@@ -846,7 +1273,7 @@ void showStartupAnimation() {
   String company = "ZEDLABS";
   String tagline1 = "INNOVATE BEYOND";
   String tagline2 = "LIMITS";
-  String version = "Presensi v0.1.2";
+  String version = "Presensi System v0.1.3";
   for (int x = -60; x <= (SCREEN_WIDTH - company.length() * 12) / 2; x += 3) {
     display.clearDisplay();
     display.setTextSize(2);
@@ -864,7 +1291,7 @@ void showStartupAnimation() {
   display.setCursor((SCREEN_WIDTH - version.length() * 6) / 2, 55);
   display.println(version);
   display.display();
-  delay(2000);
+  delay(700);
   for (int i = 0; i < 3; i++) {
     display.clearDisplay();
     display.display();
