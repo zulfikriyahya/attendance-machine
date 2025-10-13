@@ -147,6 +147,101 @@ Response:
 
 ---
 
+## **Tabel Konversi Pin Lengkap**
+
+| Fungsi | Komponen | ESP32-C3 Super Mini | ESP32 DevKit V1 30 Pin | Keterangan |
+|--------|----------|---------------------|------------------------|------------|
+| **RST** | MFRC522 | GPIO 3 | **GPIO 16** | Reset RFID Reader |
+| **SS/SDA** | MFRC522 | GPIO 7 | **GPIO 5** | Slave Select/Chip Select |
+| **SCK** | MFRC522 | GPIO 4 | **GPIO 18** | SPI Clock |
+| **MOSI** | MFRC522 | GPIO 6 | **GPIO 23** | Master Out Slave In |
+| **MISO** | MFRC522 | GPIO 5 | **GPIO 19** | Master In Slave Out |
+| **CS** | SD Card | GPIO 1 | **GPIO 15** | Chip Select SD Card |
+| **SDA** | OLED | GPIO 8 | **GPIO 21** | I2C Data |
+| **SCL** | OLED | GPIO 9 | **GPIO 22** | I2C Clock |
+| **Signal** | Buzzer | GPIO 10 | **GPIO 4** | Output Buzzer |
+
+## **Kode Definisi Pin untuk ESP32 DevKit V1:**
+
+```cpp
+// Pin MFRC522 (RFID Reader) - SPI
+#define RST_PIN 16
+#define SS_PIN 5
+#define SCK 18
+#define MISO 19
+#define MOSI 23
+
+// Pin SD Card - SPI
+#define SD_CS 15
+
+// Pin OLED Display - I2C
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+// Pin Buzzer
+#define BUZZER_PIN 4
+```
+
+## **Diagram Koneksi:**
+
+### **MFRC522 → ESP32 DevKit V1**
+```
+MFRC522          ESP32
+----------------------------
+SDA (SS)    →    GPIO 5
+SCK         →    GPIO 18
+MOSI        →    GPIO 23
+MISO        →    GPIO 19
+IRQ         →    (tidak dipakai)
+GND         →    GND
+RST         →    GPIO 16
+3.3V        →    3.3V
+```
+
+### **OLED → ESP32 DevKit V1**
+```
+OLED            ESP32
+----------------------------
+VCC         →    3.3V atau 5V
+GND         →    GND
+SCL         →    GPIO 22
+SDA         →    GPIO 21
+```
+
+### **Buzzer → ESP32 DevKit V1**
+```
+Buzzer          ESP32
+----------------------------
+Positive    →    GPIO 4
+Negative    →    GND
+```
+
+### **SD Card Module → ESP32 DevKit V1** (Opsional)
+```
+SD Card         ESP32
+----------------------------
+CS          →    GPIO 15
+SCK         →    GPIO 18
+MOSI        →    GPIO 23
+MISO        →    GPIO 19
+VCC         →    5V
+GND         →    GND
+```
+
+## **Catatan Penting:**
+
+✅ **Pin yang Aman Digunakan untuk Output:** GPIO 4, 5, 12-15, 16-19, 21-23, 25-27, 32-33
+
+⚠️ **Pin yang Harus Dihindari:**
+- GPIO 0: Boot mode selection (pull-up saat boot)
+- GPIO 2: Boot mode selection, LED onboard
+- GPIO 6-11: Terhubung ke flash internal (JANGAN DIGUNAKAN)
+- GPIO 34-39: Input only (ADC), tidak bisa output
+
+📌 **SPI menggunakan 1 bus yang sama**, jadi MFRC522 dan SD Card share pin SCK, MISO, MOSI, tapi punya CS sendiri-sendiri.
+
+---
+
 ## 📄 Lisensi
 
 Proyek ini dilisensikan di bawah MIT License. Lihat file `LICENSE`.
