@@ -1,23 +1,23 @@
-# Attendance Machine 📡🎓
+# Attendance Machine
 
 Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Laravel** via WiFi. Cocok digunakan di lingkungan sekolah, kantor, dan instansi yang membutuhkan sistem presensi real-time, cepat, efisien, dan hemat daya.
 
 ---
 
-## 🔧 Fitur Utama (v0.1.1)
+## Fitur Utama (v0.1.1)
 
-- 📶 **Auto WiFi Connect** (Multi SSID)
-- 📡 **Pembacaan RFID** (modul RC522)
-- 🧠 **Koneksi ke API Laravel** (JSON POST + API Key)
-- 🖥️ **Layar OLED 0.96"** untuk status real-time
-- 🔊 **Buzzer feedback** (berhasil / gagal / error)
-- 🔄 **Respon cepat & anti dobel scan (debounce)**
-- 🔐 **Autentikasi API Token**
-- 🌙 **Sleep Mode Otomatis** saat idle untuk hemat daya
+- **Auto WiFi Connect** (Multi SSID)
+- **Pembacaan RFID** (modul RC522)
+- **Koneksi ke API Laravel** (JSON POST + API Key)
+- **Layar OLED 0.96"** untuk status real-time
+- **Buzzer feedback** (berhasil / gagal / error)
+- **Respon cepat & anti dobel scan (debounce)**
+- **Autentikasi API Token**
+- **Sleep Mode Otomatis** saat idle untuk hemat daya
 
 ---
 
-## 🧰 Komponen Hardware
+## Komponen Hardware
 
 | Komponen    | Spesifikasi                  |
 | ----------- | ---------------------------- |
@@ -39,10 +39,11 @@ Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Lara
 | OLED SDA   | GPIO8        |
 | OLED SCL   | GPIO9        |
 | Buzzer     | GPIO10       |
+| SD Card CS | GPIO1        |
 
 ---
 
-## ⚙️ Instalasi & Setup
+## Instalasi & Setup
 
 ### 1. Persiapan Software
 
@@ -56,45 +57,14 @@ Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Lara
   - `WiFi`
   - `HTTPClient`
 
-### 2. Konfigurasi
-
-1. Salin `config-example.h` menjadi `config.h`
-2. Isi data berikut:
-
-```cpp
-#define RST_PIN 3
-#define SS_PIN 7
-...
-const char WS1[] PROGMEM = "ZEDLABS";                             // SSID Wifi 1
-const char WS2[] PROGMEM = "ZULFIKRIYAHYA";                       // SSID Wifi 2 (Opsional)
-const char WP1[] PROGMEM = "Password1";                           // Password Wifi 1
-const char WP2[] PROGMEM = "Password2";                           // Password Wifi 2 (Opsional)
-const char API[] PROGMEM = "https://presensi.example.sch.id/api"; // Sesuaikan dengan APP_URL pada.env
-const char KEY[] PROGMEM = "SecretApi";                           // Sesuaikan dengan API_SECRET pada.env
-const char NT1[] PROGMEM = "pool.ntp.org";
-const char NT2[] PROGMEM = "time.google.com";
-const char NT3[] PROGMEM = "id.pool.ntp.org";
-const char NT4[] PROGMEM = "time.nist.gov";
-const char NT5[] PROGMEM = "time.cloudflare.com";
-
-const int WCT = 2;
-const int NCT = 5;
-const int NTO = 8000;
-const int MNR = 2;
-const int SST = 18; // Mulai Sleep Mode
-const int EST = 5;  // Selesai Sleep Mode
-const long GMT = 25200;
-const int DST = 0;
-```
-
-### 3. Upload ke Board
+### 2. Upload ke Board
 
 - Pastikan port USB terdeteksi
 - Compile dan upload via Arduino IDE
 
 ---
 
-## 🔍 Alur Kerja
+## Alur Kerja
 
 1. Perangkat menyala → OLED tampil logo dan animasi startup
 2. Terhubung ke WiFi otomatis
@@ -108,7 +78,7 @@ const int DST = 0;
 
 ---
 
-## 📡 API Endpoint
+## API Endpoint
 
 ```
 POST /api/presensi/rfid
@@ -131,13 +101,13 @@ Response:
 
 ---
 
-## 🖼️ Diagram Koneksi
+## Diagram Koneksi
 
 ![Schema](v0.1.1.svg)
 
 ---
 
-## ❗ Troubleshooting
+## Troubleshooting
 
 - **OLED tidak tampil?** Cek alamat I2C (`0x3C`), pastikan koneksi SDA/SCL benar
 - **RC522 tidak terbaca?** Periksa `SCK`, `MISO`, `MOSI`, `SS`, `RST` sesuai pinout
@@ -234,32 +204,32 @@ GND         →    GND
 
 ## **Catatan Penting:**
 
-✅ **Pin yang Aman Digunakan untuk Output:** GPIO 4, 5, 12-15, 16-19, 21-23, 25-27, 32-33
+**Pin yang Aman Digunakan untuk Output:** GPIO 4, 5, 12-15, 16-19, 21-23, 25-27, 32-33
 
-⚠️ **Pin yang Harus Dihindari:**
+**Pin yang Harus Dihindari:**
 
 - GPIO 0: Boot mode selection (pull-up saat boot)
 - GPIO 2: Boot mode selection, LED onboard
 - GPIO 6-11: Terhubung ke flash internal (JANGAN DIGUNAKAN)
 - GPIO 34-39: Input only (ADC), tidak bisa output
 
-📌 **SPI menggunakan 1 bus yang sama**, jadi MFRC522 dan SD Card share pin SCK, MISO, MOSI, tapi punya CS sendiri-sendiri.
+**SPI menggunakan 1 bus yang sama**, jadi MFRC522 dan SD Card share pin SCK, MISO, MOSI, tapi punya CS sendiri-sendiri.
 
 ---
 
-## 📄 Lisensi
+## Lisensi
 
 Proyek ini dilisensikan di bawah MIT License. Lihat file `LICENSE`.
 
 ---
 
-## 👤 Author
+## Author
 
 **Zulfikri Yahya**
-📍 Indonesia
+Pandeglang, Banten - Indonesia
 
 ---
 
-## 🤝 Kontribusi
+## Kontribusi
 
-Pull Request dan laporan isu sangat disambut! Silakan fork proyek ini, modifikasi, dan kirim PR 👍
+Pull Request dan laporan isu sangat disambut! Silakan fork proyek ini, modifikasi, dan kirim PR.
