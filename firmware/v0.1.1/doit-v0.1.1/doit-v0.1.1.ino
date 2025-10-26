@@ -21,12 +21,12 @@
 #define SH 64
 #define DEB 300
 
-const char WS1[] PROGMEM = "YourSSID1";
-const char WS2[] PROGMEM = "YourSSID2";
-const char WP1[] PROGMEM = "YourPassword1";
-const char WP2[] PROGMEM = "YourPassword2";
-const char API[] PROGMEM = "https://presensi.example.id/api";
-const char KEY[] PROGMEM = "YourSecretToken";
+const char WS1[] PROGMEM = "ZEDLABS";                             // SSID Wifi 1
+const char WS2[] PROGMEM = "ZULFIKRIYAHYA";                       // SSID Wifi 2 (Opsional)
+const char WP1[] PROGMEM = "Password1";                           // Password Wifi 1
+const char WP2[] PROGMEM = "Password2";                           // Password Wifi 2 (Opsional)
+const char API[] PROGMEM = "https://presensi.example.sch.id/api"; // Sesuaikan dengan APP_URL pada.env
+const char KEY[] PROGMEM = "SecretApi";                           // Sesuaikan dengan API_SECRET pada.env
 const char NT1[] PROGMEM = "pool.ntp.org";
 const char NT2[] PROGMEM = "time.google.com";
 const char NT3[] PROGMEM = "id.pool.ntp.org";
