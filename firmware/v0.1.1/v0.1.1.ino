@@ -175,7 +175,28 @@ void setup()
 void loop()
 {
   periodicTimeSync();
-
+  struct tm ti;
+  if (getTimeWithFallback(&ti))
+  {
+    int jm = ti.tm_hour;
+    if (jm >= SST || jm < EST)
+    {
+      showOLED(F("SLEEP MODE"), F("SAMPAI PAGI"));
+      delay(2000);
+      int ds;
+      if (jm >= SST)
+      {
+        ds = ((24 - jm + EST) * 3600) - (ti.tm_min * 60 + ti.tm_sec);
+      }
+      else
+      {
+        ds = ((EST - jm) * 3600) - (ti.tm_min * 60 + ti.tm_sec);
+      }
+      uint64_t sd = (uint64_t)ds * 1000000ULL;
+      esp_sleep_enable_timer_wakeup(sd);
+      esp_deep_sleep_start();
+    }
+  }
   if (rfd.PICC_IsNewCardPresent() && rfd.PICC_ReadCardSerial())
   {
     uidToString(rfd.uid.uidByte, rfd.uid.size, buf);
@@ -209,29 +230,6 @@ void loop()
 
   showStandbySignal();
   delay(80);
-
-  struct tm ti;
-  if (getTimeWithFallback(&ti))
-  {
-    int jm = ti.tm_hour;
-    if (jm >= SST || jm < EST)
-    {
-      showOLED(F("SLEEP MODE"), F("SAMPAI PAGI"));
-      delay(2000);
-      int ds;
-      if (jm >= SST)
-      {
-        ds = ((24 - jm + EST) * 3600) - (ti.tm_min * 60 + ti.tm_sec);
-      }
-      else
-      {
-        ds = ((EST - jm) * 3600) - (ti.tm_min * 60 + ti.tm_sec);
-      }
-      uint64_t sd = (uint64_t)ds * 1000000ULL;
-      esp_sleep_enable_timer_wakeup(sd);
-      esp_deep_sleep_start();
-    }
-  }
 }
 
 void showStandbySignal()
