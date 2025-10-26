@@ -149,17 +149,17 @@ Response:
 
 ## **Tabel Konversi Pin Lengkap**
 
-| Fungsi | Komponen | ESP32-C3 Super Mini | ESP32 DevKit V1 30 Pin | Keterangan |
-|--------|----------|---------------------|------------------------|------------|
-| **RST** | MFRC522 | GPIO 3 | **GPIO 16** | Reset RFID Reader |
-| **SS/SDA** | MFRC522 | GPIO 7 | **GPIO 5** | Slave Select/Chip Select |
-| **SCK** | MFRC522 | GPIO 4 | **GPIO 18** | SPI Clock |
-| **MOSI** | MFRC522 | GPIO 6 | **GPIO 23** | Master Out Slave In |
-| **MISO** | MFRC522 | GPIO 5 | **GPIO 19** | Master In Slave Out |
-| **CS** | SD Card | GPIO 1 | **GPIO 15** | Chip Select SD Card |
-| **SDA** | OLED | GPIO 8 | **GPIO 21** | I2C Data |
-| **SCL** | OLED | GPIO 9 | **GPIO 22** | I2C Clock |
-| **Signal** | Buzzer | GPIO 10 | **GPIO 4** | Output Buzzer |
+| Fungsi     | Komponen | ESP32-C3 Super Mini | ESP32 DevKit V1 30 Pin | Keterangan               |
+| ---------- | -------- | ------------------- | ---------------------- | ------------------------ |
+| **RST**    | MFRC522  | GPIO 3              | **GPIO 16**            | Reset RFID Reader        |
+| **SS/SDA** | MFRC522  | GPIO 7              | **GPIO 5**             | Slave Select/Chip Select |
+| **SCK**    | MFRC522  | GPIO 4              | **GPIO 18**            | SPI Clock                |
+| **MOSI**   | MFRC522  | GPIO 6              | **GPIO 23**            | Master Out Slave In      |
+| **MISO**   | MFRC522  | GPIO 5              | **GPIO 19**            | Master In Slave Out      |
+| **CS**     | SD Card  | GPIO 1              | **GPIO 15**            | Chip Select SD Card      |
+| **SDA**    | OLED     | GPIO 8              | **GPIO 21**            | I2C Data                 |
+| **SCL**    | OLED     | GPIO 9              | **GPIO 22**            | I2C Clock                |
+| **Signal** | Buzzer   | GPIO 10             | **GPIO 4**             | Output Buzzer            |
 
 ## **Kode Definisi Pin untuk ESP32 DevKit V1:**
 
@@ -185,6 +185,7 @@ Response:
 ## **Diagram Koneksi:**
 
 ### **MFRC522 → ESP32 DevKit V1**
+
 ```
 MFRC522          ESP32
 ----------------------------
@@ -199,6 +200,7 @@ RST         →    GPIO 16
 ```
 
 ### **OLED → ESP32 DevKit V1**
+
 ```
 OLED            ESP32
 ----------------------------
@@ -209,6 +211,7 @@ SDA         →    GPIO 21
 ```
 
 ### **Buzzer → ESP32 DevKit V1**
+
 ```
 Buzzer          ESP32
 ----------------------------
@@ -217,6 +220,7 @@ Negative    →    GND
 ```
 
 ### **SD Card Module → ESP32 DevKit V1** (Opsional)
+
 ```
 SD Card         ESP32
 ----------------------------
@@ -233,6 +237,7 @@ GND         →    GND
 ✅ **Pin yang Aman Digunakan untuk Output:** GPIO 4, 5, 12-15, 16-19, 21-23, 25-27, 32-33
 
 ⚠️ **Pin yang Harus Dihindari:**
+
 - GPIO 0: Boot mode selection (pull-up saat boot)
 - GPIO 2: Boot mode selection, LED onboard
 - GPIO 6-11: Terhubung ke flash internal (JANGAN DIGUNAKAN)
