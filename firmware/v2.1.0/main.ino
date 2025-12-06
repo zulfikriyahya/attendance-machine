@@ -86,6 +86,7 @@ const int MAX_RECORDS_PER_FILE      = 50;   // 50 records per file
 const int MAX_QUEUE_FILES           = 100;   // Maksimal 100 files (total 5000 records)
 const unsigned long SYNC_INTERVAL   = 60000; // 60 detik
 const unsigned long MAX_OFFLINE_AGE = 2592000;  // 1 bulan
+const unsigned long MIN_REPEAT_INTERVAL = 3600; // Batas waktu minimal boleh tap lagi (Misal: 1 Jam / 3600 detik)
 
 const int SLEEP_START_HOUR          = 18;
 const int SLEEP_END_HOUR            = 1;
@@ -293,7 +294,9 @@ bool isDuplicateInAllQueues(const char* rfid, unsigned long currentUnixTime) {
         
         if (fileRfid.equals(rfid)) {
           unsigned long timeDiff = currentUnixTime - fileUnixTime;
-          if (timeDiff < MAX_OFFLINE_AGE) {
+
+
+          if (timeDiff < MIN_REPEAT_INTERVAL) {
             file.close();
             digitalWrite(PIN_SD_CS, HIGH);
             return true; // Duplikat ditemukan
