@@ -1,9 +1,9 @@
 # Catatan Rilis Firmware v1.0.0
 
-**Versi:** 1.0.0 (Stabil)
-**Tanggal Rilis:** Desember 2025
-**Perangkat Target:** ESP32-C3 Super Mini
-**Penulis:** Yahya Zulfikri
+- **Versi:** 1.0.0 (Stabil)
+- **Tanggal Rilis:** Desember 2025
+- **Perangkat Target:** ESP32-C3 Super Mini
+- **Penulis:** Yahya Zulfikri
 
 ## Ringkasan
 
