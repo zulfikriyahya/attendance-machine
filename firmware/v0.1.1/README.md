@@ -4,7 +4,7 @@ Sistem **presensi otomatis berbasis RFID dengan ESP32**, terhubung ke **API Lara
 
 ---
 
-## Fitur Utama (v0.1.1)
+## Fitur Utama (v1.2.0)
 
 - **Auto WiFi Connect** (Multi SSID)
 - **Pembacaan RFID** (modul RC522)
@@ -103,7 +103,7 @@ Response:
 
 ## Diagram Koneksi
 
-![Schema](v0.1.1.svg)
+![Schema](v1.2.0.svg)
 
 ---
 
