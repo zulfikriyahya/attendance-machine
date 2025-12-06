@@ -90,13 +90,13 @@ const int NTP_MAX_RETRIES           = 2;
 
 // Pengaturan Offline Storage
 const char OFFLINE_FILE[] PROGMEM   = "/presensi.csv";
-const unsigned long SYNC_INTERVAL   = 30000;  // 30 detik
-const unsigned long MAX_OFFLINE_AGE = 3600;   // 1 jam (3600 detik)
+const unsigned long SYNC_INTERVAL   = 60000;  // 60 detik
+const unsigned long MAX_OFFLINE_AGE = 2592000;   // 1 bulan
 const int MAX_BATCH_SIZE            = 50;     // Maksimal 50 records per sync
 
 // Jadwal Mode Tidur (Format 24-jam)
 const int SLEEP_START_HOUR          = 18;  // 18:00 (6 Malam)
-const int SLEEP_END_HOUR            = 1;   // 05:00 (5 Pagi)
+const int SLEEP_END_HOUR            = 5;   // 05:00 (5 Pagi)
 
 // Pengaturan Waktu
 const long GMT_OFFSET_SEC           = 25200;  // GMT+7 (WIB)
