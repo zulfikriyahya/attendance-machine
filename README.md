@@ -15,7 +15,7 @@ Proyek ini bertujuan untuk menyediakan solusi perangkat keras terbuka (_open-sou
 - **Aman:** Data yang dikirimkan terenkripsi melalui protokol HTTPS.
 - **Interaktif:** Memberikan umpan balik visual dan suara saat pengguna menempelkan kartu.
 
-## Fitur Utama
+## Fitur Utama (Versi Stabil v1.0.0)
 
 - **Identifikasi Cepat:** Pembacaan kartu RFID instan dengan validasi anti-duplikasi (_debounce_).
 - **Konektivitas Cloud:** Terhubung ke API server menggunakan WiFi dengan dukungan Multi-SSID untuk redundansi koneksi.
@@ -23,13 +23,25 @@ Proyek ini bertujuan untuk menyediakan solusi perangkat keras terbuka (_open-sou
 - **Manajemen Daya Cerdas:** Fitur _Deep Sleep_ otomatis sesuai jadwal operasional kantor atau sekolah.
 - **Antarmuka Informatif:** Layar OLED menampilkan status koneksi, kekuatan sinyal, waktu saat ini, dan notifikasi presensi.
 
+## Rencana Pengembangan (Roadmap)
+
+Proyek ini dirancang untuk berkembang jauh melampaui sekadar pencatat kehadiran dasar. Kami memiliki peta jalan pengembangan jangka panjang yang mencakup:
+
+- **v2.x:** Sinkronisasi massal (_Bulk Sync_) dan antrean data offline.
+- **v3.x:** Integrasi biometrik (Sidik Jari) sebagai cadangan kartu.
+- **v4.x:** Sistem buku tamu digital dan integrasi data PPDB.
+- **v5.x:** Ekosistem perpustakaan pintar (sirkulasi mandiri).
+- **v6.x:** Pemantauan lokasi siswa/pegawai berbasis BLE Beacon dan LoRa.
+
+Detail teknis lengkap mengenai visi masa depan ini dapat dibaca pada dokumen **Cetak Biru Proyek**.
+
 ## Struktur Repositori
 
 Repositori ini diatur dengan struktur direktori sebagai berikut:
 
 ```text
 .
-├── docs/                  # Dokumentasi cetak biru (blueprint) dan visi proyek
+├── docs/                  # Cetak biru (Blueprint) dan Roadmap pengembangan (v1.x - v6.x)
 ├── firmware/              # Kode sumber perangkat keras
 │   └── v1.0.0/            # Versi rilis stabil saat ini
 │       ├── main.ino       # Kode program utama (Arduino IDE)
@@ -55,9 +67,9 @@ Untuk mulai membuat, mengembangkan, atau mempelajari perangkat ini, silakan ikut
     Rakit komponen sesuai dengan diagram jalur yang tersedia pada folder firmware.
 
 2.  **Dokumentasi dan Konsep:**
-    Pelajari visi jangka panjang, arsitektur sistem, dan rencana pengembangan masa depan.
+    Pelajari visi jangka panjang, arsitektur sistem, dan rencana pengembangan fitur masa depan.
 
-    - **[Baca Cetak Biru Proyek](docs/README.md)**
+    - **[Baca Cetak Biru & Roadmap Proyek](docs/README.md)**
 
 3.  **Instalasi Firmware:**
     Masuk ke direktori versi firmware untuk mendapatkan panduan teknis lengkap, daftar pustaka (_library_) yang dibutuhkan, dan kode program.
