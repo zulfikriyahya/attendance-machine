@@ -1,155 +1,65 @@
 # Sistem Presensi Pintar (RFID)
 
-Sistem presensi berbasis _Internet of Things_ (IoT) yang dirancang untuk perangkat ESP32-C3 Super Mini. Sistem ini menggunakan teknologi RFID untuk identifikasi, layar OLED untuk antarmuka pengguna, dan komunikasi HTTPS aman untuk pengiriman data ke server.
+> Solusi absensi modern berbasis _Internet of Things_ (IoT) yang efisien, aman, dan hemat energi.
 
-## Deskripsi Proyek
+Sistem ini adalah perangkat presensi mandiri yang dirancang untuk mencatat kehadiran menggunakan kartu RFID. Dibangun di atas platform ESP32-C3, perangkat ini terintegrasi langsung dengan server backend melalui protokol internet yang aman, menghilangkan kebutuhan akan pencatatan manual atau pemindahan data fisik.
 
-Proyek ini adalah solusi perangkat tegar (firmware) untuk mesin absensi mandiri. Perangkat akan membaca kartu RFID (Mifare), memvalidasi data, dan mengirimkannya ke server backend melalui REST API. Sistem dilengkapi dengan fitur manajemen daya otomatis (Deep Sleep) dan sinkronisasi waktu jaringan (NTP) untuk memastikan akurasi data.
+![Diagram Sistem](firmware/v1.0.0/diagram.svg)
 
-**Identitas Proyek:**
+## Mengapa Proyek Ini Dibuat?
 
-- **Penulis:** Yahya Zulfikri (ZedLabs)
-- **Versi:** 1.0.0 (Stabil)
-- **Tanggal Rilis:** Desember 2025
+Proyek ini bertujuan untuk menyediakan solusi perangkat keras terbuka (_open-source hardware_) untuk kebutuhan manajemen kehadiran yang:
+
+- **Otomatis:** Sinkronisasi waktu dan pengiriman data terjadi secara _real-time_.
+- **Hemat Energi:** Mampu menonaktifkan diri secara otomatis di luar jam kerja.
+- **Aman:** Data yang dikirimkan terenkripsi melalui HTTPS.
+- **Mudah Digunakan:** Cukup tempelkan kartu, dan sistem memberikan umpan balik visual serta suara.
 
 ## Fitur Utama
 
-1.  **Konektivitas Aman:** Menggunakan protokol HTTPS dengan autentikasi `X-API-KEY` untuk komunikasi data.
-2.  **Manajemen Waktu Otomatis:** Sinkronisasi waktu menggunakan NTP (Network Time Protocol) dengan dukungan multi-server (pool.ntp.org, google, nist, dll) dan mekanisme _fallback_ otomatis.
-3.  **Mode Hemat Daya (Deep Sleep):** Perangkat otomatis masuk ke mode tidur dalam pada jam 18:00 hingga 05:00 untuk menghemat energi.
-4.  **Redundansi Jaringan:** Mendukung konfigurasi dua SSID WiFi yang berbeda dan akan mencoba beralih secara otomatis jika koneksi utama gagal.
-5.  **Antarmuka Interaktif:** Menampilkan status koneksi, kekuatan sinyal WiFi, animasi startup, dan umpan balik visual pada layar OLED.
-6.  **Indikator Audio:** Umpan balik suara (Buzzer) untuk status sukses, gagal, atau notifikasi sistem.
+- 🆔 **Identifikasi Cepat:** Pembacaan kartu RFID instan dengan validasi anti-duplikasi (_debounce_).
+- ☁️ **Konektivitas Cloud:** Terhubung ke API server menggunakan WiFi (mendukung Multi-SSID untuk cadangan koneksi).
+- 🕒 **Waktu Presisi:** Jam internal yang selalu akurat berkat sinkronisasi NTP otomatis.
+- 🔋 **Manajemen Daya Cerdas:** Fitur _Deep Sleep_ otomatis sesuai jadwal operasional kantor/sekolah.
+- 🖥️ **Antarmuka Informatif:** Layar OLED menampilkan status koneksi, sinyal, jam, dan notifikasi presensi.
 
-## Spesifikasi Perangkat Keras
+## Struktur Repositori
 
-Sistem ini dirancang khusus untuk mikrokontroler **ESP32-C3 Super Mini**.
-
-### Pemetaan Pin (Wiring Diagram)
-
-| Komponen         | Pin Perangkat | Pin ESP32-C3 (GPIO) | Keterangan  |
-| :--------------- | :------------ | :------------------ | :---------- |
-| **RFID RC522**   | SDA (SS)      | GPIO 7              | Chip Select |
-|                  | SCK           | GPIO 4              | SPI Clock   |
-|                  | MOSI          | GPIO 6              | SPI MOSI    |
-|                  | MISO          | GPIO 5              | SPI MISO    |
-|                  | RST           | GPIO 3              | Reset       |
-|                  | VCC           | 3.3V                | Daya        |
-|                  | GND           | GND                 | Ground      |
-| **OLED SSD1306** | SDA           | GPIO 8              | I2C Data    |
-|                  | SCL           | GPIO 9              | I2C Clock   |
-|                  | VCC           | 3.3V                | Daya        |
-|                  | GND           | GND                 | Ground      |
-| **Buzzer**       | POS (+)       | GPIO 10             | Output PWM  |
-|                  | NEG (-)       | GND                 | Ground      |
-
-## Struktur Direktori
+Repositori ini diatur dengan struktur sebagai berikut untuk memudahkan pengembangan dan penggunaan:
 
 ```text
 .
-├── doc
-│   └── README.md          # Dokumentasi tambahan
-├── firmware
-│   └── v1.0.0
-│       ├── diagram.svg    # Diagram skematik/wiring
-│       ├── LICENSE        # Lisensi firmware
-│       ├── main.ino       # Kode sumber utama
-│       └── README.md      # Catatan rilis versi
-├── LICENSE                # Lisensi proyek utama
-└── README.md              # File ini
+├── doc/                   # Dokumentasi umum dan panduan pengguna
+├── firmware/              # Kode sumber perangkat keras
+│   └── v1.0.0/            # Versi rilis stabil saat ini
+│       ├── main.ino       # Kode program (Arduino IDE)
+│       ├── diagram.svg    # Skema jalur rangkaian
+│       └── README.md      # Detail teknis & panduan instalasi firmware
+└── LICENSE                # Lisensi penggunaan proyek
 ```
 
-## Instalasi dan Konfigurasi
+## Perangkat Keras yang Didukung
 
-### Persyaratan Perangkat Lunak
+Sistem ini dikembangkan dan diuji secara spesifik menggunakan komponen berikut:
 
-- Arduino IDE
-- Board Manager: ESP32 by Espressif Systems
+1.  **Mikrokontroler:** ESP32-C3 Super Mini
+2.  **Sensor:** RFID MFRC522
+3.  **Display:** OLED 0.96" I2C (SSD1306)
+4.  **Indikator:** Active Buzzer 5V
 
-### Pustaka yang Dibutuhkan
+## Memulai (Getting Started)
 
-Instal pustaka berikut melalui Library Manager di Arduino IDE:
+Untuk mulai membuat atau mengembangkan perangkat ini, silakan ikuti langkah berikut:
 
-1.  **MFRC522** (oleh GithubCommunity)
-2.  **Adafruit SSD1306** (oleh Adafruit)
-3.  **Adafruit GFX Library** (oleh Adafruit)
-4.  **ArduinoJson** (oleh Benoit Blanchon)
-
-### Konfigurasi Kode
-
-Sebelum mengunggah kode, sesuaikan bagian konfigurasi pada file `firmware/v1.0.0/main.ino`:
-
-**1. Pengaturan WiFi**
-
-```cpp
-const char WIFI_SSID_1[] PROGMEM     = "Nama_WiFi_Utama";
-const char WIFI_PASSWORD_1[] PROGMEM = "Password_Utama";
-const char WIFI_SSID_2[] PROGMEM     = "Nama_WiFi_Cadangan";
-const char WIFI_PASSWORD_2[] PROGMEM = "Password_Cadangan";
-```
-
-**2. Pengaturan API Server**
-
-```cpp
-const char API_BASE_URL[] PROGMEM    = "https://domain-anda.com";
-const char API_SECRET_KEY[] PROGMEM  = "Kunci_API_Rahasia_Anda";
-```
-
-**3. Pengaturan Zona Waktu**
-Sesuaikan `GMT_OFFSET_SEC` jika Anda berada di luar zona waktu WIB (GMT+7).
-
-```cpp
-const long GMT_OFFSET_SEC = 25200; // 25200 detik = 7 Jam
-```
-
-## Spesifikasi API Backend
-
-Perangkat mengharapkan endpoint API berikut tersedia di server:
-
-### 1. Pengecekan Koneksi (Ping)
-
-- **Metode:** `GET`
-- **URL:** `/api/presensi/ping`
-- **Header:** `X-API-KEY: [API_SECRET_KEY]`
-- **Respon Sukses:** HTTP 200 OK
-
-### 2. Pengiriman Data RFID
-
-- **Metode:** `POST`
-- **URL:** `/api/presensi/rfid`
-- **Header:**
-  - `Content-Type: application/json`
-  - `X-API-KEY: [API_SECRET_KEY]`
-- **Body:**
-  ```json
-  {
-    "rfid": "1234567890"
-  }
-  ```
-- **Respon Sukses (JSON):**
-  ```json
-  {
-    "message": "BERHASIL",
-    "data": {
-      "nama": "Nama Pengguna",
-      "waktu": "08:00:00",
-      "status": "MASUK"
-    }
-  }
-  ```
-
-## Cara Penggunaan
-
-1.  Hidupkan perangkat.
-2.  Tunggu proses inisialisasi (logo startup, koneksi WiFi, dan sinkronisasi waktu).
-3.  Pastikan layar menampilkan pesan "TEMPELKAN KARTU" dan indikator sinyal WiFi muncul.
-4.  Tempelkan kartu RFID pada pembaca.
-5.  Perangkat akan berbunyi dan menampilkan nama serta status kehadiran jika berhasil.
+1.  **Siapkan Perangkat Keras:** Rakit komponen sesuai diagram yang tersedia.
+2.  **Instalasi Firmware:** Masuk ke direktori firmware versi terbaru untuk panduan teknis lengkap, daftar pustaka (_library_), dan kode program.
+    - 👉 **[Lihat Panduan Firmware v1.0.0](firmware/v1.0.0/README.md)**
+3.  **Konfigurasi Server:** Pastikan Anda memiliki endpoint API yang siap menerima data JSON dari perangkat.
 
 ## Lisensi
 
-Proyek ini didistribusikan di bawah lisensi yang tercantum dalam file `LICENSE`. Silakan merujuk ke file tersebut untuk informasi hak cipta dan penggunaan.
+Proyek ini bersifat _Open Source_. Anda bebas memodifikasi dan mendistribusikan ulang sesuai dengan ketentuan yang tercantum dalam file [LICENSE](./LICENSE).
 
 ---
 
-Copyright (c) 2025 Yahya Zulfikri - ZedLabs
+**Pengelola Proyek:** Yahya Zulfikri (ZedLabs)
