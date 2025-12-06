@@ -2,8 +2,6 @@
 
 Sistem presensi berbasis _Internet of Things_ (IoT) yang dirancang untuk perangkat ESP32-C3 Super Mini. Sistem ini menggunakan teknologi RFID untuk identifikasi, layar OLED untuk antarmuka pengguna, dan komunikasi HTTPS aman untuk pengiriman data ke server.
 
-**Repositori:** https://github.com/zulfikriyahya/attendance-machine.git
-
 ## Deskripsi Proyek
 
 Proyek ini adalah solusi perangkat tegar (firmware) untuk mesin absensi mandiri. Perangkat akan membaca kartu RFID (Mifare), memvalidasi data, dan mengirimkannya ke server backend melalui REST API. Sistem dilengkapi dengan fitur manajemen daya otomatis (Deep Sleep) dan sinkronisasi waktu jaringan (NTP) untuk memastikan akurasi data.
