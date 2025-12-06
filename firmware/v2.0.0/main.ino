@@ -93,6 +93,7 @@ const char OFFLINE_FILE[] PROGMEM   = "/presensi.csv";
 const unsigned long SYNC_INTERVAL   = 60000;  // 60 detik
 const unsigned long MAX_OFFLINE_AGE = 2592000;   // 1 bulan
 const int MAX_BATCH_SIZE            = 50;     // Maksimal 50 records per sync
+const unsigned long MIN_REPEAT_INTERVAL = 3600; // Batas waktu minimal boleh tap lagi (Misal: 1 Jam / 3600 detik)
 
 // Jadwal Mode Tidur (Format 24-jam)
 const int SLEEP_START_HOUR          = 18;  // 18:00 (6 Malam)
@@ -204,7 +205,7 @@ bool isDuplicateInSD(const char* rfid, unsigned long currentUnixTime) {
       // Cek apakah RFID sama dan waktu kurang dari 1 jam
       if (fileRfid.equals(rfid)) {
         unsigned long timeDiff = currentUnixTime - fileUnixTime;
-        if (timeDiff < MAX_OFFLINE_AGE) {
+        if (timeDiff < MIN_REPEAT_INTERVAL) {
           file.close();
           return true; // Duplikat ditemukan
         }
