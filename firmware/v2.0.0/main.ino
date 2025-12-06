@@ -91,7 +91,7 @@ const int NTP_MAX_RETRIES           = 2;
 // Pengaturan Offline Storage
 const char OFFLINE_FILE[] PROGMEM   = "/presensi.csv";
 const unsigned long SYNC_INTERVAL   = 60000;  // 60 detik
-const unsigned long MAX_OFFLINE_AGE = 2592000;   // 1 bulan
+const unsigned long MAX_OFFLINE_AGE = 2592000;  // 1 bulan
 const int MAX_BATCH_SIZE            = 50;     // Maksimal 50 records per sync
 const unsigned long MIN_REPEAT_INTERVAL = 3600; // Batas waktu minimal boleh tap lagi (Misal: 1 Jam / 3600 detik)
 
