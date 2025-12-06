@@ -1,6 +1,6 @@
 # Sistem Presensi Pintar (RFID)
 
-> Solusi absensi modern berbasis _Internet of Things_ (IoT) yang efisien, aman, dan hemat energi.
+> Solusi presensi modern berbasis _Internet of Things_ (IoT) yang efisien, aman, dan hemat energi.
 
 Sistem ini adalah perangkat presensi mandiri yang dirancang untuk mencatat kehadiran menggunakan kartu RFID. Dibangun di atas platform ESP32-C3, perangkat ini terintegrasi langsung dengan server backend melalui protokol internet yang aman, menghilangkan kebutuhan akan pencatatan manual atau pemindahan data fisik.
 
