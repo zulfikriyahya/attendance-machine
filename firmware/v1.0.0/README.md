@@ -76,7 +76,3 @@ Karena ini adalah rilis versi pertama, instalasi dilakukan melalui flashing lang
 3.  Aktifkan opsi "USB CDC On Boot: Enabled" agar Serial Monitor dapat terbaca (jika diperlukan untuk debugging).
 4.  Pastikan parameter `API_BASE_URL` dan `WIFI_SSID` sudah disesuaikan.
 5.  Unggah (Upload) ke perangkat.
-
----
-
-**Repositori:** https://github.com/zulfikriyahya/attendance-machine.git
