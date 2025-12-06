@@ -53,6 +53,7 @@ Untuk mulai membuat atau mengembangkan perangkat ini, silakan ikuti langkah beri
 
 1.  **Siapkan Perangkat Keras:** Rakit komponen sesuai diagram yang tersedia.
 2.  **Instalasi Firmware:** Masuk ke direktori firmware versi terbaru untuk panduan teknis lengkap, daftar pustaka (_library_), dan kode program.
+    - **[Lihat Brainstorm Proyek](docs/README.md)**
     - **[Lihat Panduan Firmware v1.0.0](firmware/v1.0.0/README.md)**
 3.  **Konfigurasi Server:** Pastikan Anda memiliki endpoint API yang siap menerima data JSON dari perangkat.
 
