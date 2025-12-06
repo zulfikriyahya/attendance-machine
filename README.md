@@ -9,7 +9,7 @@ Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yan
 | Versi  | Wiring Diagram                        |
 | ------ | ------------------------------------- |
 | v0.1.0 | ![v0.1.0](firmware/v0.1.0/v0.1.0.svg) |
-| v0.1.1 | ![v0.1.1](firmware/v0.1.1/v0.1.1.svg) |
+| v1.2.0 | ![v1.2.0](firmware/v0.1.1/v0.1.1.svg) |
 
 ---
 
@@ -34,7 +34,7 @@ Attendance Machine adalah sistem presensi otomatis berbasis **ESP32 + RFID** yan
 | Versi  | Deskripsi Singkat                                     |Catatan                            |
 | ------ | ----------------------------------------------------- |-----------------------------------|
 | v0.1.0 | Firmware dasar: scan RFID, kirim API, tampilkan OLED  |Public Release                     |
-| v0.1.1 | Tambahan: sleep mode otomatis di luar jam operasional |Public Release                     |
+| v1.2.0 | Tambahan: sleep mode otomatis di luar jam operasional |Public Release                     |
 | v0.1.2 | Tambahan: auto-sync data offline saat online kembali  |Hanya Untuk MTs Negeri 1 Pandeglang|
 
 ---
