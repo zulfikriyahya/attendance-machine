@@ -17,11 +17,11 @@ Proyek ini bertujuan untuk menyediakan solusi perangkat keras terbuka (_open-sou
 
 ## Fitur Utama
 
-- 🆔 **Identifikasi Cepat:** Pembacaan kartu RFID instan dengan validasi anti-duplikasi (_debounce_).
-- ☁️ **Konektivitas Cloud:** Terhubung ke API server menggunakan WiFi (mendukung Multi-SSID untuk cadangan koneksi).
-- 🕒 **Waktu Presisi:** Jam internal yang selalu akurat berkat sinkronisasi NTP otomatis.
-- 🔋 **Manajemen Daya Cerdas:** Fitur _Deep Sleep_ otomatis sesuai jadwal operasional kantor/sekolah.
-- 🖥️ **Antarmuka Informatif:** Layar OLED menampilkan status koneksi, sinyal, jam, dan notifikasi presensi.
+- **Identifikasi Cepat:** Pembacaan kartu RFID instan dengan validasi anti-duplikasi (_debounce_).
+- **Konektivitas Cloud:** Terhubung ke API server menggunakan WiFi (mendukung Multi-SSID untuk cadangan koneksi).
+- **Waktu Presisi:** Jam internal yang selalu akurat berkat sinkronisasi NTP otomatis.
+- **Manajemen Daya Cerdas:** Fitur _Deep Sleep_ otomatis sesuai jadwal operasional kantor/sekolah.
+- **Antarmuka Informatif:** Layar OLED menampilkan status koneksi, sinyal, jam, dan notifikasi presensi.
 
 ## Struktur Repositori
 
@@ -53,7 +53,7 @@ Untuk mulai membuat atau mengembangkan perangkat ini, silakan ikuti langkah beri
 
 1.  **Siapkan Perangkat Keras:** Rakit komponen sesuai diagram yang tersedia.
 2.  **Instalasi Firmware:** Masuk ke direktori firmware versi terbaru untuk panduan teknis lengkap, daftar pustaka (_library_), dan kode program.
-    - 👉 **[Lihat Panduan Firmware v1.0.0](firmware/v1.0.0/README.md)**
+    - **[Lihat Panduan Firmware v1.0.0](firmware/v1.0.0/README.md)**
 3.  **Konfigurasi Server:** Pastikan Anda memiliki endpoint API yang siap menerima data JSON dari perangkat.
 
 ## Lisensi
