@@ -20,7 +20,7 @@ Tujuan utamanya adalah menghapus hambatan teknis dalam pencatatan kehadiran, men
 
 ### Alur Kerja Utama
 
-1.  **Identifikasi:** Pengguna menempelkan kartu RFID.
+1.  **Identifikasi:** Pengguna menempelkan kartu RFID (atau sidik jari pada pengembangan masa depan).
 2.  **Pemrosesan:** Perangkat memvalidasi input dan memberikan umpan balik (Suara/Visual).
 3.  **Sinkronisasi:**
     - **Online:** Data dikirim instan ke server via WiFi.
@@ -29,7 +29,7 @@ Tujuan utamanya adalah menghapus hambatan teknis dalam pencatatan kehadiran, men
 
 ---
 
-## Fitur Unggulan
+## Fitur Unggulan (Versi Saat Ini)
 
 ### A. Fitur Perangkat (Firmware & Hardware)
 
@@ -82,16 +82,44 @@ Sistem ini didesain untuk skalabilitas tinggi, mampu melayani ratusan hingga rib
 
 ---
 
-## Roadmap Pengembangan
+## Peta Jalan Pengembangan (Roadmap)
 
-Fitur-fitur berikut direncanakan untuk pembaruan firmware dan hardware di masa depan:
+Pengembangan sistem dibagi menjadi beberapa fase versi untuk memastikan stabilitas, efisiensi data, dan perluasan fungsionalitas:
 
-- [ ] **Penyimpanan Eksternal:** Slot SD Card untuk _backup log_ jangka panjang.
-- [ ] **Validasi Lokal:** Sinkronisasi database UID ke perangkat untuk validasi nama tanpa internet.
-- [ ] **OTA Update:** Pembaruan firmware jarak jauh melalui dashboard admin.
-- [ ] **Smart Audio:** Fitur _Text-to-Speech_ untuk menyebutkan nama pengguna saat scan.
-- [ ] **Snapshot:** Integrasi kamera mini (ESP32-CAM) untuk bukti visual.
-- [ ] **Geo-Fencing:** Validasi lokasi berdasarkan pemetaan MAC Address WiFi sekitar.
+### Versi 2.x: Optimasi Sinkronisasi & Ketahanan Data
+
+Fokus pada efisiensi pengiriman data (bandwidth) dan penanganan kondisi jaringan yang tidak stabil.
+
+- **Auto Sync-Bulk:** Mekanisme antrean cerdas dimana data presensi disimpan sementara di memori lokal (buffer) secara default.
+- **Interval Sinkronisasi:** Sistem akan memeriksa tumpukan data offline dan melakukan pengunggahan massal (bulk upload) setiap 30 detik secara otomatis jika koneksi tersedia.
+
+### Versi 3.x: Integrasi Biometrik (Fingerprint)
+
+Penambahan lapisan keamanan dan redundansi perangkat keras.
+
+- **Modul Sidik Jari:** Integrasi sensor sidik jari optikal sebagai metode alternatif (backup) jika kartu RFID siswa hilang atau tertinggal.
+- **Mode Ganda:** Perangkat mendukung input dari kartu RFID maupun sidik jari secara bersamaan.
+
+### Versi 4.x: Manajemen Tamu & Integrasi PPDB
+
+Transformasi perangkat menjadi kios pelayanan mandiri untuk wali siswa dan tamu sekolah.
+
+- **Buku Tamu Digital:** Orang tua atau wali siswa dapat melakukan pencatatan kunjungan menggunakan pemindaian KTP (NIK/RFID) atau sidik jari.
+- **Integrasi PPDB:** Data sidik jari atau identitas wali diambil langsung dari basis data Pendaftaran Peserta Didik Baru (PPDB), sehingga tidak perlu registrasi ulang.
+
+### Versi 5.x: Ekosistem Perpustakaan Pintar
+
+Ekspansi fungsionalitas menuju manajemen aset pendidikan dan literasi.
+
+- **Pencatatan Pengunjung:** Mode khusus untuk mencatat statistik kunjungan siswa ke perpustakaan.
+- **Sirkulasi Mandiri:** Integrasi sistem untuk peminjaman dan pengembalian buku perpustakaan secara mandiri menggunakan kartu siswa, menghubungkan data siswa dengan inventaris buku.
+
+### Versi 6.x: Pemantauan Lokasi & Jaringan LoRa
+
+Implementasi teknologi pelacakan aset dan komunikasi jarak jauh hemat daya untuk kompleks madrasah/kantor yang luas.
+
+- **Pemantauan Keberadaan (Presence Monitoring):** Perangkat difungsikan sebagai pemindai (scanner) yang ditempatkan di setiap kelas atau ruang kantor untuk mendeteksi Bluetooth Tag (BLE Beacon) yang dibawa oleh setiap siswa atau pegawai secara otomatis.
+- **Integrasi LoRa:** Menggunakan teknologi LoRa (Long Range) untuk mengirimkan data telemetri lokasi dari ruang kelas/kantor ke server pusat (Gateway), mengatasi keterbatasan jangkauan sinyal WiFi di area gedung yang luas atau terhalang tembok tebal.
 
 ---
 
