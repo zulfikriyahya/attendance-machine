@@ -59,7 +59,3 @@ Untuk mulai membuat atau mengembangkan perangkat ini, silakan ikuti langkah beri
 ## Lisensi
 
 Proyek ini bersifat _Open Source_. Anda bebas memodifikasi dan mendistribusikan ulang sesuai dengan ketentuan yang tercantum dalam file [LICENSE](./LICENSE).
-
----
-
-**Pengelola Proyek:** Yahya Zulfikri (ZedLabs)
