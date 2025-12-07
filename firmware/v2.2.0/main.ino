@@ -8,7 +8,7 @@
  * Updated : Desember 2025
  * Version : 2.2.0
  *
- * CHANGELOG v2.4.0:
+ * CHANGELOG v2.2.0:
  * - Support Legacy Memory Card 128 MB
  * - Progress bar & visual feedback yang lebih baik
  * - Periodic time sync untuk akurasi waktu
