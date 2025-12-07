@@ -1,78 +1,115 @@
-# Catatan Rilis Firmware v1.0.0
+# Sistem Presensi Pintar Berbasis IoT (RFID & ESP32-C3)
 
-- **Versi:** 1.0.0 (Stabil)
-- **Tanggal Rilis:** Desember 2025
-- **Perangkat Target:** ESP32-C3 Super Mini
-- **Penulis:** Yahya Zulfikri
+## Deskripsi Proyek
 
-## Ringkasan
+Sistem ini adalah perangkat presensi kehadiran berbasis _Internet of Things_ (IoT) yang dirancang menggunakan mikrokontroler ESP32-C3 Super Mini. Perangkat ini memanfaatkan teknologi RFID (_Radio Frequency Identification_) untuk autentikasi pengguna dan mengirimkan data kehadiran secara _real-time_ ke server pusat melalui protokol HTTPS yang aman.
 
-Versi 1.0.0 adalah rilis produksi pertama untuk Sistem Presensi Pintar. Versi ini berfokus pada stabilitas koneksi inti, keamanan pengiriman data, dan manajemen daya dasar. Firmware ini telah diuji untuk penggunaan operasional harian dengan fitur sinkronisasi waktu otomatis dan mode hemat daya terjadwal.
+Firmware ini dikembangkan dengan fokus pada efisiensi daya, keandalan konektivitas, dan ketahanan data. Sistem dilengkapi dengan fitur manajemen daya otomatis (_Deep Sleep_), redundansi koneksi jaringan, serta mekanisme sinkronisasi waktu presisi menggunakan protokol NTP (_Network Time Protocol_).
 
-## Fitur Baru dan Perubahan
+## Spesifikasi Teknis
 
-### Inti Sistem
+### Perangkat Keras
 
-- Rilis awal sistem presensi berbasis RFID.
-- Implementasi mekanisme _Watchdog_ manual melalui pengecekan status WiFi dan API berkala.
-- Penanganan memori RTC untuk menyimpan waktu saat perangkat melakukan _soft restart_.
+- **Unit Pemroses Utama:** ESP32-C3 Super Mini (RISC-V 32-bit Single-Core).
+- **Pembaca Identitas:** Modul RFID RC522 (13.56 MHz).
+- **Antarmuka Visual:** OLED Display 0.96 inci (SSD1306) resolusi 128x64 piksel, I2C.
+- **Indikator Audio:** Buzzer Pasif/Aktif (Piezoelectric).
 
-### Jaringan dan Konektivitas
+### Fitur Utama
 
-- **Dukungan Dual SSID:** Sistem menyimpan dua konfigurasi WiFi dan akan mencoba beralih secara otomatis jika jaringan utama tidak tersedia.
-- **Keamanan API:** Komunikasi backend menggunakan protokol HTTPS.
-- **Autentikasi:** Implementasi header `X-API-KEY` pada setiap permintaan HTTP untuk keamanan endpoint.
+1.  **Keamanan Transmisi Data:** Komunikasi API menggunakan HTTPS dengan autentikasi berbasis `X-API-KEY`.
+2.  **Manajemen Daya Cerdas:** Mode _Deep Sleep_ terjadwal otomatis (aktif pukul 18:00 hingga 05:00 WIB) untuk penghematan energi signifikan.
+3.  **Redundansi Jaringan:** Dukungan _Multi-SSID_ dengan mekanisme _failover_ otomatis jika jaringan utama tidak tersedia.
+4.  **Sinkronisasi Waktu Presisi:** Menggunakan 5 server NTP berbeda dengan algoritma _fallback_ dan estimasi waktu berbasis RTC (_Real-Time Clock_) internal jika koneksi internet terputus.
+5.  **Antarmuka Pengguna Interaktif:** Menampilkan status koneksi, kekuatan sinyal (RSSI), waktu, dan animasi status pemindaian pada layar OLED.
 
-### Manajemen Waktu
+## Konfigurasi Pin (_Pinout_)
 
-- **NTP Multi-Server:** Sinkronisasi waktu menggunakan 5 server berbeda (pool.ntp.org, google, nist, cloudflare) untuk menjamin keberhasilan sinkronisasi.
-- **Estimasi Waktu Cadangan:** Jika NTP gagal total, sistem menggunakan penghitung waktu internal berbasis `millis()` yang dikalkulasi dari sinkronisasi sukses terakhir (disimpan di memori RTC).
+Perangkat lunak ini dikonfigurasi khusus untuk papan pengembangan **ESP32-C3 Super Mini**. Berikut adalah tabel pemetaan pin (GPIO):
 
-### Manajemen Daya
+| Komponen         | Pin Modul | Pin ESP32-C3 (GPIO) | Keterangan                |
+| :--------------- | :-------- | :------------------ | :------------------------ |
+| **RFID RC522**   | SDA (SS)  | GPIO 7              | Chip Select (SPI)         |
+|                  | SCK       | GPIO 4              | Clock (SPI)               |
+|                  | MOSI      | GPIO 6              | Master Out Slave In (SPI) |
+|                  | MISO      | GPIO 5              | Master In Slave Out (SPI) |
+|                  | RST       | GPIO 3              | Reset                     |
+| **OLED SSD1306** | SDA       | GPIO 8              | Data (I2C)                |
+|                  | SCL       | GPIO 9              | Clock (I2C)               |
+| **Buzzer**       | VCC / (+) | GPIO 10             | Output PWM/Tone           |
 
-- **Deep Sleep Terjadwal:** Perangkat otomatis memasuki mode tidur dalam pada pukul 18:00 dan bangun kembali pada pukul 05:00 WIB untuk menghemat daya.
+> **Catatan:** Tegangan operasional seluruh periferal adalah 3.3V. Pastikan koneksi _Ground_ (GND) terhubung dengan baik.
 
-### Antarmuka Pengguna (UI/UX)
+## Prasyarat Instalasi
 
-- Indikator visual kekuatan sinyal WiFi (RSSI) pada layar OLED.
-- Animasi _booting_ "ZEDLABS".
-- Mekanisme _debounce_ (penundaan) 300ms untuk mencegah pembacaan kartu ganda yang tidak disengaja.
-- Umpan balik audio (Buzzer) yang berbeda untuk kondisi: Startup, Kartu Terdeteksi, Sukses, dan Gagal.
+### Pustaka (_Libraries_)
 
-## Detail Teknis
+Pastikan pustaka berikut telah terinstal pada Arduino IDE atau PlatformIO sebelum melakukan kompilasi:
 
-### Diagram Skematik v1.0.0
+1.  **MFRC522** oleh GithubCommunity (untuk komunikasi modul RFID).
+2.  **Adafruit SSD1306** oleh Adafruit (driver layar OLED).
+3.  **Adafruit GFX Library** oleh Adafruit (grafis dasar).
+4.  **ArduinoJson** oleh Benoit Blanchon (parsing data JSON).
+5.  **WiFi** & **HTTPClient** (bawaan paket board ESP32).
 
-![Diagram Skematik v1.0.0](diagram.svg)
+### Konfigurasi Firmware
 
-### Versi Pustaka (Dependensi)
+Sebelum mengunggah kode, lakukan penyesuaian pada bagian `KONFIGURASI JARINGAN` di dalam kode sumber:
 
-Disarankan menggunakan versi pustaka berikut atau yang lebih baru saat melakukan kompilasi:
+```cpp
+// Kredensial WiFi (Mendukung 2 SSID untuk cadangan)
+const char WIFI_SSID_1[] PROGMEM     = "NAMA_WIFI_UTAMA";
+const char WIFI_SSID_2[] PROGMEM     = "NAMA_WIFI_CADANGAN";
+const char WIFI_PASSWORD_1[] PROGMEM = "PASSWORD_WIFI_UTAMA";
+const char WIFI_PASSWORD_2[] PROGMEM = "PASSWORD_WIFI_CADANGAN";
 
-- **ArduinoJson:** v6.x
-- **Adafruit SSD1306:** v2.5.x
-- **MFRC522:** v1.4.x
-- **ESP32 Board Definition:** v2.0.x atau v3.0.x
+// Konfigurasi API Endpoint
+const char API_BASE_URL[] PROGMEM    = "https://domain-server-anda.com";
+const char API_SECRET_KEY[] PROGMEM  = "TOKEN_API_ANDA";
+```
 
-### Konfigurasi Pin (GPIO)
+## Spesifikasi API Backend
 
-Firmware ini dikompilasi dengan konfigurasi pin keras (hardcoded) untuk ESP32-C3 Super Mini:
+Perangkat ini mengirimkan permintaan HTTP POST ke endpoint server. Pastikan backend Anda siap menerima format berikut:
 
-- **SPI (RFID):** SS(7), SCK(4), MOSI(6), MISO(5), RST(3)
-- **I2C (OLED):** SDA(8), SCL(9)
-- **Output:** Buzzer(10)
+- **Endpoint:** `/api/presensi/rfid`
+- **Method:** `POST`
+- **Headers:**
+  - `Content-Type`: `application/json`
+  - `X-API-KEY`: `[Nilai API_SECRET_KEY]`
+- **Body Request:**
+  ```json
+  {
+    "rfid": "1234567890"
+  }
+  ```
+- **Ekspektasi Respons (JSON):**
+  ```json
+  {
+    "message": "Presensi Berhasil",
+    "data": {
+      "nama": "Nama Pengguna",
+      "waktu": "07:00:00",
+      "status": "Masuk"
+    }
+  }
+  ```
 
-## Batasan yang Diketahui (Known Issues)
+## Mekanisme Operasional
 
-1.  **Tidak Ada Mode Offline:** Firmware ini belum mendukung penyimpanan data lokal (SD Card/SPIFFS). Jika WiFi terputus saat pemindaian kartu, data kehadiran tidak akan tersimpan dan pengguna diminta untuk mencoba lagi.
-2.  **Akurasi Waktu Cadangan:** Jika koneksi internet terputus lebih dari 24 jam dan perangkat melakukan restart, estimasi waktu internal mungkin mengalami penyimpangan (drift) beberapa detik hingga menit karena keterbatasan kristal osilator internal ESP32.
+1.  **Booting:** Sistem melakukan inisialisasi I2C, SPI, dan menyambungkan ke WiFi. Jika gagal, sistem akan melakukan _restart_ otomatis.
+2.  **Sinkronisasi Waktu:** Sistem menghubungi server NTP. Jika gagal, sistem menggunakan estimasi waktu dari memori RTC (jika tersedia dari sesi sebelumnya).
+3.  **Siaga (Idle):** Menampilkan waktu dan status sinyal. Menunggu kartu RFID ditempelkan.
+4.  **Pemindaian:** Saat kartu dideteksi, UID dibaca dan dikirim ke server.
+5.  **Umpan Balik:**
+    - _Sukses:_ Nada _beep_ pendek 3 kali dan pesan "BERHASIL" pada layar.
+    - _Gagal:_ Nada panjang dan pesan kesalahan.
+6.  **Deep Sleep:** Pada pukul 18:00, sistem secara otomatis masuk ke mode tidur dalam dan akan bangun kembali pada pukul 05:00 keesokan harinya.
 
-## Instruksi Pembaruan
+## Riwayat Versi
 
-Karena ini adalah rilis versi pertama, instalasi dilakukan melalui flashing langsung menggunakan kabel USB-C:
+- **v1.0.0 (Stabil)** - Rilis awal. Fitur dasar presensi, sinkronisasi NTP, dan mode hemat daya.
 
-1.  Buka `main.ino` di Arduino IDE.
-2.  Pilih Board: "ESP32C3 Dev Module".
-3.  Aktifkan opsi "USB CDC On Boot: Enabled" agar Serial Monitor dapat terbaca (jika diperlukan untuk debugging).
-4.  Pastikan parameter `API_BASE_URL` dan `WIFI_SSID` sudah disesuaikan.
-5.  Unggah (Upload) ke perangkat.
+## Lisensi
+
+Hak Cipta © 2025. Kode sumber ini bersifat terbuka untuk tujuan pendidikan dan pengembangan lebih lanjut.
