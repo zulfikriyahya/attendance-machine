@@ -49,6 +49,10 @@ Perangkat lunak ini dikonfigurasi untuk **ESP32-C3 Super Mini**. Perhatikan bahw
 
 > **Perhatian:** Pastikan integritas sinyal pada bus SPI (GPIO 4, 5, 6) terjaga saat menghubungkan dua perangkat budak (RFID dan SD Card).
 
+## Diagram Koneksi
+
+![Diagram](./diagram.svg)
+
 ## Prasyarat Perangkat Lunak
 
 Pastikan pustaka berikut terinstal pada lingkungan pengembangan (Arduino IDE/PlatformIO):
