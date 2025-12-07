@@ -40,6 +40,8 @@ Perangkat lunak ini dikonfigurasi khusus untuk papan pengembangan **ESP32-C3 Sup
 
 > **Catatan:** Tegangan operasional seluruh periferal adalah 3.3V. Pastikan koneksi _Ground_ (GND) terhubung dengan baik.
 
+## Diagram Koneksi
+
 ![Diagram](./diagram.svg)
 
 ## Prasyarat Instalasi
