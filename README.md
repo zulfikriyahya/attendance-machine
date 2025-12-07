@@ -83,8 +83,7 @@ Untuk mendukung fungsionalitas sinkronisasi massal, server backend wajib menyedi
         "timestamp": "2025-12-07 07:00:00",
         "device_id": "ESP32_A1B2",
         "sync_mode": true
-      },
-      ...
+      }
     ]
   }
   ```
