@@ -92,8 +92,7 @@ const unsigned long MIN_REPEAT_INTERVAL = 1800; // Debounce 30 menit untuk kartu
         "timestamp": "YYYY-MM-DD HH:MM:SS",
         "device_id": "ESP32_MAC_ADDR",
         "sync_mode": true
-      },
-      ...
+      }
     ]
   }
   ```
