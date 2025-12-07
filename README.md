@@ -1,7 +1,3 @@
-Berikut adalah pembaruan untuk file **README.md** utama (root) repositori Anda. Dokumen ini telah disesuaikan untuk mencerminkan status proyek yang kini telah mencapai **Versi 2.1.0 (Hybrid/Offline Capable)**.
-
----
-
 # Sistem Presensi Pintar (RFID) - Hybrid Edition
 
 > Solusi presensi cerdas berbasis IoT yang tangguh, mendukung penyimpanan offline, dan sinkronisasi data otomatis (_Self-Healing_).
