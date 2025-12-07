@@ -61,11 +61,11 @@
 // ========================================
 const char WIFI_SSID_1[] PROGMEM        = "SSID_WIFI_1";
 const char WIFI_SSID_2[] PROGMEM        = "SSID_WIFI_2";
-const char WIFI_PASSWORD_1[] PROGMEM    = "Password_Wifi_1";
-const char WIFI_PASSWORD_2[] PROGMEM    = "Password_Wifi_2";
+const char WIFI_PASSWORD_1[] PROGMEM    = "PasswordWifi1";
+const char WIFI_PASSWORD_2[] PROGMEM    = "PasswordWifi1";
 
 const char API_BASE_URL[] PROGMEM       = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM     = "APISecretKey";
+const char API_SECRET_KEY[] PROGMEM     = "SecretAPIToken";
 
 // Server NTP
 const char NTP_SERVER_1[] PROGMEM       = "pool.ntp.org";

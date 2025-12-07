@@ -11,7 +11,7 @@
  * PEMETAAN PERANGKAT KERAS (ESP32-C3 Super Mini):
  * ---------------------------------------
  * [RFID RC522]          [OLED SSD1306]         [BUZZER]         [SD CARD]
- * - SDA (SS) : GPIO 7   - SDA : GPIO 8         - (+) : GPIO 10  - CS   : GPIO 0
+ * - SDA (SS) : GPIO 7   - SDA : GPIO 8         - (+) : GPIO 10  - CS   : GPIO 1
  * - SCK      : GPIO 4   - SCL : GPIO 9         - (-) : GND      - SCK  : GPIO 4
  * - MOSI     : GPIO 6   - VCC : 3.3V                            - MOSI : GPIO 6
  * - MISO     : GPIO 5   - GND : GND                             - MISO : GPIO 5
@@ -65,13 +65,13 @@
 // ========================================
 // KONFIGURASI JARINGAN
 // ========================================
-const char WIFI_SSID_1[] PROGMEM        = "SSID_WIFI_1";
-const char WIFI_SSID_2[] PROGMEM        = "SSID_WIFI_2";
-const char WIFI_PASSWORD_1[] PROGMEM    = "Password_Wifi_1";
-const char WIFI_PASSWORD_2[] PROGMEM    = "Password_Wifi_2";
+const char WIFI_SSID_1[] PROGMEM        = "PRESENSI";
+const char WIFI_SSID_2[] PROGMEM        = "ZEDLABS";
+const char WIFI_PASSWORD_1[] PROGMEM    = "P@ssw0rd";
+const char WIFI_PASSWORD_2[] PROGMEM    = "P@ssw0rd";
 
-const char API_BASE_URL[] PROGMEM       = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM     = "APISecretKey";
+const char API_BASE_URL[] PROGMEM       = "http://192.168.250.72:8000";
+const char API_SECRET_KEY[] PROGMEM     = "P@ndegl@ng_14012000*";
 
 // Server NTP
 const char NTP_SERVER_1[] PROGMEM       = "pool.ntp.org";

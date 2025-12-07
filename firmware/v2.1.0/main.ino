@@ -53,18 +53,18 @@
 
 #define SCREEN_WIDTH        128
 #define SCREEN_HEIGHT       64
-#define DEBOUNCE_TIME       300
+#define DEBOUNCE_TIME       150
 
 // ========================================
 // KONFIGURASI JARINGAN
 // ========================================
-const char WIFI_SSID_1[] PROGMEM        = "SSID_WIFI_1";
-const char WIFI_SSID_2[] PROGMEM        = "SSID_WIFI_2";
-const char WIFI_PASSWORD_1[] PROGMEM    = "Password_Wifi_1";
-const char WIFI_PASSWORD_2[] PROGMEM    = "Password_Wifi_2";
+const char WIFI_SSID_1[] PROGMEM        = "PRESENSI";
+const char WIFI_SSID_2[] PROGMEM        = "ZEDLABS";
+const char WIFI_PASSWORD_1[] PROGMEM    = "P@ssw0rd";
+const char WIFI_PASSWORD_2[] PROGMEM    = "P@ssw0rd";
 
-const char API_BASE_URL[] PROGMEM       = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM     = "APISecretKey";
+const char API_BASE_URL[] PROGMEM       = "http://192.168.250.72:8000";
+const char API_SECRET_KEY[] PROGMEM     = "P@ndegl@ng_14012000*";
 
 // Server NTP
 const char NTP_SERVER_1[] PROGMEM       = "pool.ntp.org";
@@ -78,18 +78,18 @@ const char NTP_SERVER_5[] PROGMEM       = "time.cloudflare.com";
 // ========================================
 const int WIFI_RETRY_COUNT          = 2;
 const int NTP_SERVER_COUNT          = 5;
-const int NTP_TIMEOUT_MS            = 8000;
+const int NTP_TIMEOUT_MS            = 2500;
 const int NTP_MAX_RETRIES           = 2;
 
 // QUEUE SYSTEM CONFIGURATION
 const int MAX_RECORDS_PER_FILE      = 50;   // 50 records per file
 const int MAX_QUEUE_FILES           = 100;   // Maksimal 100 files (total 5000 records)
-const unsigned long SYNC_INTERVAL   = 60000; // 60 detik
+const unsigned long SYNC_INTERVAL   = 30000; // 60 detik
 const unsigned long MAX_OFFLINE_AGE = 2592000;  // 1 bulan
 const unsigned long MIN_REPEAT_INTERVAL = 3600; // Batas waktu minimal boleh tap lagi (Misal: 1 Jam / 3600 detik)
 
 const int SLEEP_START_HOUR          = 18;
-const int SLEEP_END_HOUR            = 1;
+const int SLEEP_END_HOUR            = 5;
 const long GMT_OFFSET_SEC           = 25200;
 const int DAYLIGHT_OFFSET_SEC       = 0;
 
@@ -698,7 +698,7 @@ bool connectToWiFi() {
       WiFi.localIP().toString().toCharArray(messageBuffer, sizeof(messageBuffer));
       showOLED(F("WIFI TERHUBUNG"), messageBuffer);
       isOnline = true;
-      delay(2000);
+      delay(1000);
       return true;
     }
   }
@@ -1026,7 +1026,7 @@ void showStartupAnimation() {
 // ========================================
 
 inline void playToneSuccess() {
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) {
     tone(PIN_BUZZER, 3000, 100);
     delay(150);
   }
@@ -1034,7 +1034,7 @@ inline void playToneSuccess() {
 }
 
 inline void playToneError() {
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 3; i++) {
     tone(PIN_BUZZER, 3000, 150);
     delay(200);
   }
@@ -1093,40 +1093,40 @@ void setup() {
   if (sdCardAvailable) {
     showOLED(F("SD CARD"), "TERSEDIA");
     playToneSuccess();
-    delay(1500);
+    delay(800);
     
     int pendingCount = countAllOfflineRecords();
     if (pendingCount > 0) {
       snprintf(messageBuffer, sizeof(messageBuffer), "%d data pending", pendingCount);
       showOLED(F("DATA OFFLINE"), messageBuffer);
-      delay(2000);
+      delay(1000);
     }
   } else {
     showOLED(F("SD CARD"), "TIDAK TERSEDIA");
     playToneError();
-    delay(2000);
+    delay(1000);
     showOLED(F("MODE ONLINE"), "SAJA");
-    delay(1500);
+    delay(1000);
   }
 
   if (!connectToWiFi()) {
     if (sdCardAvailable) {
       showOLED(F("WIFI GAGAL"), "MODE OFFLINE");
       playToneError();
-      delay(2000);
+      delay(1000);
       isOnline = false;
     } else {
       fatalError(F("WIFI & SD GAGAL"));
     }
   } else {
-    showProgress(F("PING API"), 2000);
+    showProgress(F("PING API"), 1500);
     int apiRetryCount = 0;
     while (!pingAPI() && apiRetryCount < 3) {
       apiRetryCount++;
       snprintf_P(messageBuffer, sizeof(messageBuffer), PSTR("PERCOBAAN %d"), apiRetryCount);
       showOLED(F("API GAGAL"), messageBuffer);
       playToneError();
-      delay(2000);
+      delay(1000);
     }
 
     if (isOnline) {
@@ -1138,7 +1138,7 @@ void setup() {
         if (!getTimeWithFallback(&timeInfo)) {
           showOLED(F("PERINGATAN"), "WAKTU TIDAK TERSEDIA");
           playToneError();
-          delay(2000);
+          delay(1000);
         }
       }
       
@@ -1154,7 +1154,7 @@ void setup() {
     } else {
       showOLED(F("API OFFLINE"), "MODE OFFLINE");
       playToneError();
-      delay(2000);
+      delay(1000);
     }
   }
 
@@ -1186,7 +1186,7 @@ void loop() {
 
     if (currentHour >= SLEEP_START_HOUR || currentHour < SLEEP_END_HOUR) {
       showOLED(F("SLEEP MODE"), "SAMPAI PAGI");
-      delay(2000);
+      delay(1000);
 
       int sleepSeconds;
       if (currentHour >= SLEEP_START_HOUR) {
