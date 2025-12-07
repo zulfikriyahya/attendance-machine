@@ -1,102 +1,150 @@
-# Catatan Rilis Firmware v2.0.0 (Offline Capable)
+# Sistem Presensi Pintar Hibrida (Online/Offline) Berbasis ESP32-C3
 
-- **Versi:** 2.0.0 (Offline Storage)
-- **Tanggal Rilis:** Desember 2025
-- **Perangkat Target:** ESP32-C3 Super Mini
-- **Penulis:** Yahya Zulfikri
+## Deskripsi Proyek
 
-## Ringkasan
+Sistem ini adalah solusi presensi kehadiran berbasis _Internet of Things_ (IoT) yang ditingkatkan untuk lingkungan dengan konektivitas jaringan yang tidak stabil. Menggunakan mikrokontroler ESP32-C3 Super Mini, sistem ini mengintegrasikan pembacaan RFID, antarmuka visual OLED, dan penyimpanan lokal berbasis SD Card.
 
-Versi 2.0.0 adalah pembaruan besar (major update) yang mentransformasi Sistem Presensi Pintar dari sistem yang sepenuhnya bergantung pada internet (_online-only_) menjadi sistem _Hybrid_. Pembaruan ini memperkenalkan dukungan modul SD Card untuk menyimpan data kehadiran ketika koneksi internet terputus atau server tidak dapat dijangkau. Sistem kini memiliki kemampuan _Self-Healing_ dengan melakukan sinkronisasi data otomatis saat koneksi kembali stabil.
+Versi 2.0.0 memperkenalkan arsitektur hibrida yang memprioritaskan integritas data. Sistem secara otomatis beralih ke penyimpanan lokal (CSV pada SD Card) saat koneksi server terputus dan melakukan sinkronisasi massal (_bulk synchronization_) saat koneksi pulih.
 
-## Fitur Baru dan Perubahan
+## Fitur Utama (Versi 2.0.0)
 
-### Penyimpanan & Mode Offline (Fitur Utama)
+### 1. Toleransi Kegagalan Jaringan (_Network Fault Tolerance_)
 
-- **Penyimpanan Lokal (SD Card):** Jika WiFi terputus atau API _down_, data presensi (RFID, Timestamp, Device ID) otomatis disimpan ke file CSV di SD Card.
-- **Pencegahan Duplikasi Data:** Sistem membaca data historis di SD Card untuk mencegah pencatatan ganda (_double tapping_) untuk kartu yang sama dalam kurun waktu 1 jam terakhir.
-- **Identitas Perangkat Unik:** Setiap perangkat kini menghasilkan `device_id` berbasis MAC Address untuk pelacakan sumber data saat sinkronisasi.
+- **Mode Operasi Ganda:** Sistem beroperasi dalam mode _Online_ (langsung ke API) atau _Offline_ (simpan ke SD Card) secara otomatis berdasarkan status konektivitas.
+- **Penyimpanan Lokal:** Data kehadiran disimpan dalam format CSV pada SD Card saat API tidak dapat dijangkau.
 
-### Sinkronisasi Otomatis (Auto-Sync)
+### 2. Sinkronisasi Data Cerdas
 
-- **Background Sync:** Sistem memeriksa ketersediaan internet dan keberadaan data offline setiap 60 detik.
-- **Pengiriman Massal (Bulk Upload):** Data offline dikirim dalam _batch_ (maksimal 50 data per paket) ke endpoint `/api/presensi/sync-bulk` untuk efisiensi bandwidth.
-- **Pembersihan Otomatis:** Data pada SD Card hanya akan dihapus setelah server mengonfirmasi penerimaan data (HTTP 200 OK), menjamin integritas data (tidak ada data hilang).
+- **Auto-Sync:** Mekanisme latar belakang yang berjalan setiap 60 detik untuk memeriksa dan mengunggah data tertunda (_pending_) ke server.
+- **Validasi Kedaluwarsa:** Sistem hanya menyinkronkan data yang valid (usia data < 30 hari) untuk menjaga relevansi basis data.
+- **Pembersihan Otomatis:** Data pada SD Card dihapus hanya setelah server memberikan konfirmasi sukses (HTTP 200), mencegah duplikasi atau kehilangan data.
 
-### Perangkat Keras & Pinout
+### 3. Integritas Data
 
-- **SPI Bus Bersama:** Implementasi komunikasi SPI yang membagi jalur data (SCK, MOSI, MISO) antara modul RFID RC522 dan modul SD Card dengan jalur _Chip Select_ (CS) yang berbeda.
+- **Pencegahan Duplikasi Lokal:** Algoritma internal mencegah pencatatan kartu yang sama dalam interval waktu 1 jam (dapat dikonfigurasi) saat mode offline.
+- **Identitas Perangkat:** Setiap catatan presensi menyertakan `device_id` unik berbasis MAC Address untuk pelacakan aset.
 
-### Antarmuka (UI/UX)
+### 4. Efisiensi Daya
 
-- **Indikator Status:** Tampilan OLED kini menampilkan status `ONLINE` atau `OFFLINE` di pojok kiri atas.
-- **Counter Pending:** Menampilkan jumlah data yang belum tersinkronisasi (misal: `P:15`) di pojok kanan atas.
-- **Pesan Interaktif:** Notifikasi spesifik seperti "DATA TERSIMPAN OFFLINE" atau "DUPLIKAT! TAP < 1 JAM".
+- **Deep Sleep Terjadwal:** Mode hemat daya ekstrem aktif otomatis pada pukul 18:00 hingga 05:00 waktu setempat.
 
-## Detail Teknis
+## Spesifikasi Perangkat Keras dan Pinout
 
-### Diagram Koneksi Perangkat Keras
+Perangkat lunak ini dikonfigurasi untuk **ESP32-C3 Super Mini**. Perhatikan bahwa modul RFID dan SD Card berbagi bus SPI yang sama namun menggunakan pin _Chip Select_ (CS) yang berbeda.
 
-Sistem menggunakan **ESP32-C3 Super Mini**. Perhatikan bahwa jalur SPI digunakan bersama (Shared Bus).
+| Komponen           | Pin Modul | Pin ESP32-C3 (GPIO) | Protokol             |
+| :----------------- | :-------- | :------------------ | :------------------- |
+| **RFID RC522**     | SDA (SS)  | GPIO 7              | SPI (Chip Select 1)  |
+|                    | SCK       | GPIO 4              | SPI (Clock - Shared) |
+|                    | MOSI      | GPIO 6              | SPI (MOSI - Shared)  |
+|                    | MISO      | GPIO 5              | SPI (MISO - Shared)  |
+|                    | RST       | GPIO 3              | Reset                |
+| **SD Card Module** | CS        | GPIO 1              | SPI (Chip Select 2)  |
+|                    | SCK       | GPIO 4              | SPI (Clock - Shared) |
+|                    | MOSI      | GPIO 6              | SPI (MOSI - Shared)  |
+|                    | MISO      | GPIO 5              | SPI (MISO - Shared)  |
+| **OLED SSD1306**   | SDA       | GPIO 8              | I2C (Data)           |
+|                    | SCL       | GPIO 9              | I2C (Clock)          |
+| **Buzzer**         | VCC / (+) | GPIO 10             | Output Digital/PWM   |
 
-| Komponen       | Pin ESP32-C3 | Fungsi   | Catatan                 |
-| :------------- | :----------- | :------- | :---------------------- |
-| **RFID RC522** | GPIO 7       | SDA / SS | Chip Select RFID        |
-|                | GPIO 4       | SCK      | Shared SPI Clock        |
-|                | GPIO 6       | MOSI     | Shared SPI MOSI         |
-|                | GPIO 5       | MISO     | Shared SPI MISO         |
-|                | GPIO 3       | RST      | Reset                   |
-| **SD Card**    | **GPIO 1**   | **CS**   | **Chip Select SD Card** |
-|                | GPIO 4       | SCK      | Shared SPI Clock        |
-|                | GPIO 6       | MOSI     | Shared SPI MOSI         |
-|                | GPIO 5       | MISO     | Shared SPI MISO         |
-| **OLED**       | GPIO 8       | SDA      | I2C Data                |
-|                | GPIO 9       | SCL      | I2C Clock               |
-| **Buzzer**     | GPIO 10      | (+)      | Output Suara            |
+> **Perhatian:** Pastikan integritas sinyal pada bus SPI (GPIO 4, 5, 6) terjaga saat menghubungkan dua perangkat budak (RFID dan SD Card).
 
-> **PERINGATAN:** GPIO 1 (CS SD Card) pada beberapa board ESP32-C3 mungkin terhubung ke LED internal atau jalur Boot. Pastikan SD Card module memiliki _pull-up resistor_ yang tepat agar tidak mengganggu proses booting.
+## Prasyarat Perangkat Lunak
 
-### Struktur Data CSV (SD Card)
+Pastikan pustaka berikut terinstal pada lingkungan pengembangan (Arduino IDE/PlatformIO):
 
-File disimpan dengan nama `/presensi.csv` dengan format berikut:
+1.  **MFRC522** (Komunikasi RFID)
+2.  **Adafruit SSD1306** & **Adafruit GFX** (Tampilan OLED)
+3.  **ArduinoJson** (Serialisasi data API)
+4.  **SD** & **FS** (Manajemen sistem berkas - Bawaan Core ESP32)
+5.  **WiFi**, **HTTPClient**, **Wire**, **SPI** (Bawaan Core ESP32)
+
+## Konfigurasi Sistem
+
+Lakukan konfigurasi pada variabel global di awal kode sumber sebelum kompilasi:
+
+```cpp
+// 1. Kredensial Jaringan
+const char WIFI_SSID_1[] PROGMEM     = "SSID_UTAMA";
+const char WIFI_PASSWORD_1[] PROGMEM = "PASS_UTAMA";
+
+// 2. Endpoint API
+const char API_BASE_URL[] PROGMEM    = "https://api.domain.com";
+const char API_SECRET_KEY[] PROGMEM  = "KUNCI_AUTENTIKASI";
+
+// 3. Parameter Offline
+const unsigned long SYNC_INTERVAL    = 60000;  // Interval sync (ms)
+const unsigned long MIN_REPEAT_INTERVAL = 3600; // Debounce offline (detik)
+```
+
+## Spesifikasi API Backend
+
+Sistem membutuhkan dua titik akhir (_endpoint_) API untuk menangani presensi _real-time_ dan sinkronisasi massal.
+
+### 1. Presensi Real-time
+
+- **URL:** `/api/presensi/rfid`
+- **Metode:** `POST`
+- **Header:** `X-API-KEY`, `Content-Type: application/json`
+- **Body Request:**
+  ```json
+  {
+    "rfid": "1234567890",
+    "timestamp": "2025-12-07 08:00:00",
+    "device_id": "ESP32_A1B2"
+  }
+  ```
+
+### 2. Sinkronisasi Massal (Bulk Sync)
+
+- **URL:** `/api/presensi/sync-bulk`
+- **Metode:** `POST`
+- **Header:** `X-API-KEY`, `Content-Type: application/json`
+- **Body Request:**
+  ```json
+  {
+    "data": [
+      {
+        "rfid": "1234567890",
+        "timestamp": "2025-12-07 07:55:00",
+        "device_id": "ESP32_A1B2",
+        "sync_mode": true
+      },
+      {
+        "rfid": "0987654321",
+        "timestamp": "2025-12-07 07:56:00",
+        "device_id": "ESP32_A1B2",
+        "sync_mode": true
+      }
+    ]
+  }
+  ```
+
+## Struktur Data Lokal (CSV)
+
+Jika sistem beroperasi dalam mode offline, data disimpan pada SD Card dengan nama berkas `/presensi.csv`. Format penyimpanan adalah sebagai berikut:
 
 ```csv
 rfid,timestamp,device_id,unix_time
-1234567890,2025-12-07 08:00:00,ESP32_A1B2,1733562000
+1234567890,2025-12-07 08:00:00,ESP32_A1B2,1765094400
+0987654321,2025-12-07 08:05:00,ESP32_A1B2,1765094700
 ```
 
-- **Retensi Data:** Data offline yang usianya lebih dari 30 hari (2.592.000 detik) tidak akan diikutsertakan dalam proses sinkronisasi untuk menjaga relevansi data.
+Kolom `unix_time` digunakan internal oleh sistem untuk validasi kedaluwarsa data dan perhitungan interval duplikasi.
 
-### Endpoint API Baru
+## Indikator Status
 
-Versi 2.0.0 memerlukan backend yang mendukung endpoint baru:
+Layar OLED menampilkan informasi status kritis di baris paling atas:
 
-1.  **POST** `/api/presensi/sync-bulk`
-    - Menerima array JSON berisi multiple data presensi.
-    - Header: `X-API-KEY`.
+- **Kiri Atas:** Status Konektivitas (`ONLINE` atau `OFFLINE`).
+- **Kanan Atas:** Indikator Data Tertunda (`P:X` dimana X adalah jumlah data di SD Card yang belum tersinkronisasi).
+- **Ikon Sinyal:** Bar kekuatan sinyal WiFi (RSSI).
 
-## Instalasi dan Kompilasi
+## Riwayat Versi
 
-### Dependensi Pustaka
+- **v2.0.0 (Desember 2025):** Implementasi penyimpanan offline (SD Card), sinkronisasi massal, dan manajemen integritas data.
+- **v1.0.0 (Juli 2025):** Rilis awal dengan fungsionalitas dasar presensi online dan deep sleep.
 
-Pastikan pustaka berikut terinstal di Arduino IDE:
+## Lisensi
 
-1.  **ArduinoJson** (v6.x)
-2.  **Adafruit SSD1306** (v2.5.x)
-3.  **Adafruit GFX Library**
-4.  **MFRC522** (v1.4.x)
-5.  **SD** (Built-in ESP32)
-6.  **FS** (Built-in ESP32)
-
-### Langkah Pembaruan
-
-1.  Pastikan perkabelan perangkat keras sudah ditambahkan modul SD Card sesuai tabel pinout di atas.
-2.  Format SD Card ke **FAT32** sebelum dimasukkan.
-3.  Buka `main.ino`, sesuaikan `WIFI_SSID`, `WIFI_PASSWORD`, `API_BASE_URL`, dan `API_SECRET_KEY`.
-4.  Upload sketch menggunakan pengaturan "USB CDC On Boot: Enabled" (opsional untuk debugging).
-
-## Batasan yang Diketahui (Known Issues)
-
-1.  **Timestamp saat Offline:** Jika perangkat mati total (_hard reset_) dan dinyalakan kembali dalam keadaan tanpa internet, waktu sistem mungkin tidak akurat karena ESP32 tidak memiliki baterai RTC dedicated. Sistem akan mencoba menggunakan estimasi waktu terakhir yang tersimpan di memori RTC internal, namun akurasinya bergantung pada durasi perangkat mati.
-2.  **Konflik SPI:** Pastikan kualitas kabel jumper baik. Kabel yang terlalu panjang pada jalur SPI (SCK, MISO, MOSI) yang dibagi dua perangkat dapat menyebabkan kegagalan inisialisasi SD Card atau RFID.
-3.  **Booting:** Jika SD Card tidak terdeteksi saat _startup_, sistem akan otomatis masuk ke mode "ONLINE SAJA" dan fitur offline dimatikan hingga _restart_ berikutnya.
+Hak Cipta © 2025. Kode sumber ini didistribusikan untuk tujuan pengembangan internal dan implementasi sistem presensi korporat.
