@@ -107,7 +107,7 @@ Berkat implementasi `SdFat`, sistem ini mendukung berbagai jenis kartu memori ya
 
 ## Riwayat Perubahan (Changelog)
 
-- **v2.2.1 (Desember 2025):** Penambahan Fitur Autoconnect Wifi dan Perbaikan Bug System.
+- **v2.2.1 (Desember 2025):** Penambahan Fitur Autoconnect Wifi dan Perbaikan Bug System Versi 2.2.0.
 - **v2.2.0 (Desember 2025):** Migrasi ke `SdFat`, dukungan kartu memori legacy, optimasi buffer memori, dan perbaikan visual interface.
 - **v2.1.0:** Pengenalan sistem antrean multi-file.
 - **v2.0.0:** Implementasi mode offline dasar (single CSV).
