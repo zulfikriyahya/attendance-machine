@@ -15,6 +15,8 @@
  * - Fatal error handler untuk debugging
  * - Memory efficient dengan buffered I/O
  * - Faster operations & better user experience
+ * - Auto-reconnect WiFi setiap 30 detik
+ * - Auto-restart jika ping API gagal
  * ======================================================================================
  */
 
@@ -35,6 +37,7 @@
 #define PIN_RFID_SS 7
 #define PIN_RFID_RST 3
 #define PIN_SD_CS 1
+
 #define PIN_OLED_SDA 8
 #define PIN_OLED_SCL 9
 #define PIN_BUZZER 10
@@ -60,7 +63,8 @@ const unsigned long SYNC_INTERVAL = 60000;
 const unsigned long MAX_OFFLINE_AGE = 2592000;
 const unsigned long MIN_REPEAT_INTERVAL = 1800;
 const unsigned long TIME_SYNC_INTERVAL = 3600000;
-const int SLEEP_START_HOUR = 18;
+const unsigned long RECONNECT_INTERVAL = 30000;
+const int SLEEP_START_HOUR = 23;
 const int SLEEP_END_HOUR = 5;
 const long GMT_OFFSET_SEC = 25200;
 
@@ -81,6 +85,7 @@ char lastUID[11] = "";
 unsigned long lastScanTime = 0;
 unsigned long lastSyncTime = 0;
 unsigned long lastTimeSyncAttempt = 0;
+unsigned long lastReconnectAttempt = 0;
 char messageBuffer[64];
 bool isOnline = false;
 bool sdCardAvailable = false;
@@ -603,7 +608,7 @@ bool kirimPresensi(const char *rfidUID, char *message) {
       return true;
     } else {
       strcpy(message, isDuplicateInAllQueues(rfidUID, currentUnixTime) ? 
-             "DUPLIKAT! < 30 MIN" : "QUEUE PENUH!");
+             "CUKUP SEKALI!" : "QUEUE PENUH!");
       return false;
     }
   }
@@ -834,7 +839,7 @@ void setup() {
     
     int pending = countAllOfflineRecords();
     if (pending > 0) {
-      snprintf(messageBuffer, sizeof(messageBuffer), "%d pending", pending);
+      snprintf(messageBuffer, sizeof(messageBuffer), "%d TERSISA", pending);
       showOLED(F("DATA OFFLINE"), messageBuffer);
       delay(1000);
     }
@@ -846,13 +851,7 @@ void setup() {
   
   showProgress(F("CONNECTING WIFI"), 1500);
   if (!connectToWiFi()) {
-    if (sdCardAvailable) {
-      showOLED(F("WIFI GAGAL"), "MODE OFFLINE");
-      playToneError();
-      delay(1000);
-    } else {
-      fatalError(F("NO WIFI & SD"));
-    }
+    fatalError(F("NO WIFI"));
   } else {
     showProgress(F("PING API"), 1000);
     int apiRetryCount = 0;
@@ -880,9 +879,8 @@ void setup() {
         }
       }
     } else {
-      showOLED(F("API OFFLINE"), "MODE OFFLINE");
-      playToneError();
-      delay(1000);
+      // Jika API gagal setelah 3 retry, restart sistem
+      fatalError(F("API GAGAL"));
     }
   }
   
@@ -902,6 +900,7 @@ void setup() {
   bootTime = millis();
   lastSyncTime = millis();
   lastTimeSyncAttempt = millis();
+  lastReconnectAttempt = millis();
 }
 
 // ========================================
@@ -927,10 +926,36 @@ void loop() {
     }
   }
   
+  // Auto-reconnect WiFi
   if (WiFi.status() != WL_CONNECTED && isOnline) {
     isOnline = false;
+    showOLED(F("WIFI PUTUS"), "OFFLINE MODE");
+    playToneError();
+    delay(1000);
   } else if (WiFi.status() == WL_CONNECTED && !isOnline) {
     isOnline = pingAPI();
+  }
+  
+  // Coba reconnect setiap 30 detik jika WiFi putus
+  if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt >= RECONNECT_INTERVAL) {
+    lastReconnectAttempt = millis();
+    showOLED(F("RECONNECTING"), "WIFI...");
+    
+    if (connectToWiFi()) {
+      if (pingAPI()) {
+        showOLED(F("WIFI RESTORED"), "ONLINE");
+        playToneSuccess();
+        delay(1000);
+        
+        // Sync data offline jika ada
+        if (sdCardAvailable) {
+          int pending = countAllOfflineRecords();
+          if (pending > 0) {
+            syncAllQueues();
+          }
+        }
+      }
+    }
   }
   
   if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial()) {

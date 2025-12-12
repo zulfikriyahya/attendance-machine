@@ -1,12 +1,12 @@
-# Sistem Presensi RFID - Queue System v2.2.0 (Ultimate)
+# Sistem Presensi RFID - Queue System v2.2.1 (Ultimate)
 
 ## Deskripsi Proyek
 
-Sistem Presensi Pintar v2.2.0 adalah iterasi mutakhir dari perangkat presensi berbasis IoT yang dibangun di atas mikrokontroler ESP32-C3 Super Mini. Versi ini, yang diberi label "Ultimate", difokuskan pada optimalisasi manajemen memori (RAM), stabilitas _Input/Output_ (I/O), dan kompatibilitas perangkat keras penyimpanan.
+Sistem Presensi Pintar v2.2.1 adalah iterasi mutakhir dari perangkat presensi berbasis IoT yang dibangun di atas mikrokontroler ESP32-C3 Super Mini. Versi ini, yang diberi label "Ultimate", difokuskan pada optimalisasi manajemen memori (RAM), stabilitas _Input/Output_ (I/O), dan kompatibilitas perangkat keras penyimpanan.
 
 Perubahan paling signifikan pada versi ini adalah migrasi dari pustaka standar `SD` ke `SdFat`, memungkinkan dukungan untuk kartu SD kapasitas rendah (Legacy 128MB) hingga kapasitas tinggi dengan efisiensi _buffer_ yang superior. Sistem ini dirancang untuk operasional jangka panjang tanpa pengawasan (_unattended operation_) dengan mekanisme pemulihan kesalahan mandiri.
 
-## Fitur Teknis (Versi 2.2.0)
+## Fitur Teknis (Versi 2.2.1)
 
 ### 1. Manajemen Penyimpanan Tingkat Lanjut
 
@@ -107,6 +107,7 @@ Berkat implementasi `SdFat`, sistem ini mendukung berbagai jenis kartu memori ya
 
 ## Riwayat Perubahan (Changelog)
 
+- **v2.2.1 (Desember 2025):** Penambahan Fitur Autoconnect Wifi dan Perbaikan Bug System.
 - **v2.2.0 (Desember 2025):** Migrasi ke `SdFat`, dukungan kartu memori legacy, optimasi buffer memori, dan perbaikan visual interface.
 - **v2.1.0:** Pengenalan sistem antrean multi-file.
 - **v2.0.0:** Implementasi mode offline dasar (single CSV).
