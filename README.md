@@ -94,7 +94,7 @@ Untuk mendukung fungsionalitas sinkronisasi massal, server backend wajib menyedi
 Proyek ini dikembangkan secara bertahap menuju ekosistem manajemen kehadiran yang komprehensif:
 
 1.  **Versi 1.x (Selesai):** Presensi Daring Dasar.
-2.  **Versi 2.x (Stabil Saat Ini):** Sistem Hibrida, Antrean Offline Terpartisi, Sinkronisasi Massal, dan Dukungan Penyimpanan Warisan (_Legacy Storage_).
+2.  **Versi 2.x (Stabil Saat Ini):** Sistem Hibrida, Antrean Offline Terpartisi, Sinkronisasi Massal, Auto Reconnect Wifi dan Dukungan Penyimpanan Warisan (_Legacy Storage_).
 3.  **Versi 3.x:** Integrasi Biometrik (Sidik Jari) sebagai metode autentikasi sekunder.
 4.  **Versi 4.x:** Ekspansi fungsi menjadi Buku Tamu Digital dan Integrasi PPDB.
 5.  **Versi 5.x:** Ekosistem Perpustakaan Pintar (Sirkulasi Mandiri).
