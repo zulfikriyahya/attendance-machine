@@ -502,8 +502,6 @@ bool syncAllQueues()
     snprintf(messageBuffer, sizeof(messageBuffer), "%d records", totalSynced);
     showOLED(F("SYNC SUCCESS"), messageBuffer);
     delay(1500);
-
-    // Reset currentQueueFile ke file pertama yang kosong atau buat baru
     currentQueueFile = 0;
     String firstFile = getQueueFileName(0);
     selectSD();
@@ -823,20 +821,14 @@ void showStandbySignal()
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
-
-  // Status ONLINE/OFFLINE di kiri atas
   display.setCursor(2, 2);
   display.print(isOnline ? F("ONLINE") : F("OFFLINE"));
-
-  // TAP KARTU di tengah (center sempurna)
   const char *tapText = "TAP KARTU";
   int16_t x1, y1;
   uint16_t w1, h1;
   display.getTextBounds(tapText, 0, 0, &x1, &y1, &w1, &h1);
   display.setCursor((SCREEN_WIDTH - w1) / 2, 20);
   display.print(tapText);
-
-  // Waktu di tengah bawah TAP KARTU
   struct tm timeInfo;
   if (getTimeWithFallback(&timeInfo))
   {
@@ -845,8 +837,6 @@ void showStandbySignal()
     display.setCursor((SCREEN_WIDTH - w1) / 2, 35);
     display.print(messageBuffer);
   }
-
-  // Queue counter di bawah tengah (jika ada pending)
   if (sdCardAvailable)
   {
     int pending = countAllOfflineRecords();
@@ -858,8 +848,6 @@ void showStandbySignal()
       display.print(messageBuffer);
     }
   }
-
-  // Signal WiFi di kanan atas
   if (WiFi.status() == WL_CONNECTED)
   {
     long rssi = WiFi.RSSI();
@@ -1018,7 +1006,6 @@ void setup()
     }
     else
     {
-      // Jika API gagal setelah 3 retry, restart sistem
       fatalError(F("API GAGAL"));
     }
   }
@@ -1066,8 +1053,6 @@ void loop()
       esp_deep_sleep_start();
     }
   }
-
-  // Auto-reconnect WiFi
   if (WiFi.status() != WL_CONNECTED && isOnline)
   {
     isOnline = false;
@@ -1079,8 +1064,6 @@ void loop()
   {
     isOnline = pingAPI();
   }
-
-  // Coba reconnect setiap 30 detik jika WiFi putus
   if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt >= RECONNECT_INTERVAL)
   {
     lastReconnectAttempt = millis();
@@ -1093,8 +1076,6 @@ void loop()
         showOLED(F("WIFI RESTORED"), "ONLINE");
         playToneSuccess();
         delay(1000);
-
-        // Sync data offline jika ada
         if (sdCardAvailable)
         {
           int pending = countAllOfflineRecords();
