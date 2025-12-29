@@ -61,8 +61,8 @@ const unsigned long SYNC_INTERVAL = 60000;
 const unsigned long MAX_OFFLINE_AGE = 2592000;
 const unsigned long MIN_REPEAT_INTERVAL = 1800;
 const unsigned long TIME_SYNC_INTERVAL = 3600000;
-const unsigned long RECONNECT_INTERVAL = 60000;
-const int SLEEP_START_HOUR = 23;
+const unsigned long RECONNECT_INTERVAL = 300000;
+const int SLEEP_START_HOUR = 18;
 const int SLEEP_END_HOUR = 5;
 const long GMT_OFFSET_SEC = 25200;
 
@@ -72,6 +72,7 @@ const unsigned long MAX_SYNC_TIME = 15000;
 const unsigned long DISPLAY_UPDATE_INTERVAL = 500;
 const unsigned long PERIODIC_CHECK_INTERVAL = 1000;
 const int MAX_DUPLICATE_CHECK_LINES = 100;
+const unsigned long RECONNECT_TIMEOUT = 15000;
 
 // RTC MEMORY
 RTC_DATA_ATTR time_t lastValidTime = 0;
@@ -120,17 +121,16 @@ unsigned long syncStartTime = 0;
 enum ReconnectState
 {
   RECONNECT_IDLE,
+  RECONNECT_INIT_SSID1,
   RECONNECT_TRYING_SSID1,
+  RECONNECT_INIT_SSID2,
   RECONNECT_TRYING_SSID2,
   RECONNECT_SUCCESS,
   RECONNECT_FAILED
 };
 
 ReconnectState reconnectState = RECONNECT_IDLE;
-int reconnectRetryCount = 0;
 unsigned long reconnectStartTime = 0;
-const int MAX_RECONNECT_RETRY = 20;
-const int RECONNECT_RETRY_DELAY = 300;
 
 // RACE CONDITION PROTECTION
 volatile bool isWritingToQueue = false;
@@ -184,7 +184,6 @@ int countRecordsInFile(const String &filename)
     return 0;
 
   selectSD();
-
   if (!file.open(filename.c_str(), O_RDONLY))
   {
     deselectSD();
@@ -193,7 +192,6 @@ int countRecordsInFile(const String &filename)
 
   int count = 0;
   char line[128];
-
   if (file.available())
     file.fgets(line, sizeof(line));
 
@@ -309,7 +307,7 @@ bool initSDCard()
 }
 
 // ========================================
-// DUPLICATE CHECK (Simplified)
+// DUPLICATE CHECK
 // ========================================
 bool isDuplicate(const char *rfid, unsigned long currentUnixTime)
 {
@@ -325,7 +323,6 @@ bool isDuplicate(const char *rfid, unsigned long currentUnixTime)
   selectSD();
   bool found = false;
 
-  // Check last 2 files only
   for (int offset = 0; offset <= 1; offset++)
   {
     int fileIdx = (currentQueueFile - offset + MAX_QUEUE_FILES) % MAX_QUEUE_FILES;
@@ -415,7 +412,6 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
     }
   }
 
-  // Count records in current file
   int currentCount = 0;
   if (file.open(currentFile.c_str(), O_RDONLY))
   {
@@ -553,7 +549,9 @@ bool syncQueueFile(const String &filename)
   strcpy_P(url, API_BASE_URL);
   strcat_P(url, PSTR("/api/presensi/sync-bulk"));
 
-  http.begin(url);
+  if (!http.begin(url))
+    return false;
+
   http.addHeader(F("Content-Type"), F("application/json"));
 
   char apiKey[32];
@@ -608,7 +606,6 @@ void chunkedSync()
          filesSynced < MAX_SYNC_FILES_PER_CYCLE &&
          millis() - syncStartTime < MAX_SYNC_TIME)
   {
-
     String filename = getQueueFileName(syncCurrentFile);
 
     selectSD();
@@ -624,16 +621,39 @@ void chunkedSync()
         {
           filesSynced++;
         }
+        else if (WiFi.status() != WL_CONNECTED)
+        {
+          syncInProgress = false;
+          return;
+        }
+      }
+      else
+      {
+        selectSD();
+        sd.remove(filename.c_str());
+        deselectSD();
       }
     }
 
     syncCurrentFile++;
+    yield();
   }
 
   if (syncCurrentFile >= MAX_QUEUE_FILES)
   {
     syncInProgress = false;
     syncCurrentFile = 0;
+
+    if (filesSynced > 0)
+    {
+      int remaining = countAllOfflineRecords();
+      if (remaining == 0)
+      {
+        showOLED(F("SYNC"), "SELESAI!");
+        playToneSuccess();
+        delay(1000);
+      }
+    }
   }
 }
 
@@ -777,7 +797,7 @@ bool pingAPI()
 }
 
 // ========================================
-// NON-BLOCKING WIFI RECONNECT
+// WIFI RECONNECT
 // ========================================
 void processReconnect()
 {
@@ -787,77 +807,77 @@ void processReconnect()
     if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt >= RECONNECT_INTERVAL)
     {
       lastReconnectAttempt = millis();
-      reconnectState = RECONNECT_TRYING_SSID1;
-      reconnectRetryCount = 0;
-      reconnectStartTime = millis();
+      reconnectState = RECONNECT_INIT_SSID1;
+    }
+    break;
 
+  case RECONNECT_INIT_SSID1:
+    WiFi.disconnect(true);
+    delay(100);
+    {
       char ssid[16], password[16];
       strcpy_P(ssid, WIFI_SSID_1);
       strcpy_P(password, WIFI_PASSWORD_1);
       WiFi.begin(ssid, password);
     }
+    reconnectStartTime = millis();
+    reconnectState = RECONNECT_TRYING_SSID1;
     break;
 
   case RECONNECT_TRYING_SSID1:
-    if (millis() - reconnectStartTime >= RECONNECT_RETRY_DELAY)
+    if (WiFi.status() == WL_CONNECTED)
     {
-      reconnectStartTime = millis();
-
-      if (WiFi.status() == WL_CONNECTED)
-      {
-        reconnectState = RECONNECT_SUCCESS;
-      }
-      else
-      {
-        reconnectRetryCount++;
-
-        if (reconnectRetryCount >= MAX_RECONNECT_RETRY)
-        {
-          reconnectState = RECONNECT_TRYING_SSID2;
-          reconnectRetryCount = 0;
-
-          char ssid[16], password[16];
-          strcpy_P(ssid, WIFI_SSID_2);
-          strcpy_P(password, WIFI_PASSWORD_2);
-          WiFi.begin(ssid, password);
-        }
-      }
+      reconnectState = RECONNECT_SUCCESS;
+    }
+    else if (millis() - reconnectStartTime >= RECONNECT_TIMEOUT)
+    {
+      reconnectState = RECONNECT_INIT_SSID2;
     }
     break;
 
-  case RECONNECT_TRYING_SSID2:
-    if (millis() - reconnectStartTime >= RECONNECT_RETRY_DELAY)
+  case RECONNECT_INIT_SSID2:
+    WiFi.disconnect(true);
+    delay(100);
     {
-      reconnectStartTime = millis();
+      char ssid[16], password[16];
+      strcpy_P(ssid, WIFI_SSID_2);
+      strcpy_P(password, WIFI_PASSWORD_2);
+      WiFi.begin(ssid, password);
+    }
+    reconnectStartTime = millis();
+    reconnectState = RECONNECT_TRYING_SSID2;
+    break;
 
-      if (WiFi.status() == WL_CONNECTED)
-      {
-        reconnectState = RECONNECT_SUCCESS;
-      }
-      else
-      {
-        reconnectRetryCount++;
-
-        if (reconnectRetryCount >= MAX_RECONNECT_RETRY)
-        {
-          reconnectState = RECONNECT_FAILED;
-        }
-      }
+  case RECONNECT_TRYING_SSID2:
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      reconnectState = RECONNECT_SUCCESS;
+    }
+    else if (millis() - reconnectStartTime >= RECONNECT_TIMEOUT)
+    {
+      reconnectState = RECONNECT_FAILED;
     }
     break;
 
   case RECONNECT_SUCCESS:
     isOnline = true;
+    showOLED(F("WIFI"), "TERSAMBUNG!");
+    playToneSuccess();
+    delay(1000);
 
-    if (pingAPI())
+    syncTimeWithFallback();
+
+    if (sdCardAvailable)
     {
-      if (sdCardAvailable && !syncInProgress)
+      int pending = countAllOfflineRecords();
+      if (pending > 0)
       {
-        int pending = countAllOfflineRecords();
-        if (pending > 0)
-        {
-          chunkedSync();
-        }
+        snprintf(messageBuffer, sizeof(messageBuffer), "%d RECORDS", pending);
+        showOLED(F("SYNCING"), messageBuffer);
+        syncInProgress = false;
+        syncCurrentFile = 0;
+        lastSyncTime = millis();
+        chunkedSync();
       }
     }
 
@@ -866,6 +886,9 @@ void processReconnect()
 
   case RECONNECT_FAILED:
     isOnline = false;
+    showOLED(F("WIFI"), "GAGAL");
+    playToneError();
+    delay(1000);
     reconnectState = RECONNECT_IDLE;
     break;
   }
@@ -980,13 +1003,13 @@ void showStartupAnimation()
   const char title[] PROGMEM = "ZEDLABS";
   const char subtitle1[] PROGMEM = "INNOVATE BEYOND";
   const char subtitle2[] PROGMEM = "LIMITS";
-  const char version[] PROGMEM = "v2.3.0 CLEAN";
+  const char version[] PROGMEM = "v2.2.2 ULTIMATE";
 
   const int titleLength = 7;
   const int titleX = (SCREEN_WIDTH - (titleLength * 12)) / 2;
   const int sub1X = (SCREEN_WIDTH - 15 * 6) / 2;
   const int sub2X = (SCREEN_WIDTH - 6 * 6) / 2;
-  const int verX = (SCREEN_WIDTH - 14 * 6) / 2;
+  const int verX = (SCREEN_WIDTH - 6 * 6) / 2;
 
   for (int x = -80; x <= titleX; x += 4)
   {
@@ -1062,9 +1085,21 @@ void updateStandbySignal()
     display.setTextColor(WHITE);
 
     display.setCursor(2, 2);
-    if (reconnectState == RECONNECT_TRYING_SSID1 || reconnectState == RECONNECT_TRYING_SSID2)
+    if (reconnectState == RECONNECT_INIT_SSID1 || reconnectState == RECONNECT_TRYING_SSID1)
     {
-      display.print(F("RECONN"));
+      display.print(F("CONN SSID1"));
+      for (int i = 0; i < (millis() / 500) % 4; i++)
+        display.print('.');
+    }
+    else if (reconnectState == RECONNECT_INIT_SSID2 || reconnectState == RECONNECT_TRYING_SSID2)
+    {
+      display.print(F("CONN SSID2"));
+      for (int i = 0; i < (millis() / 500) % 4; i++)
+        display.print('.');
+    }
+    else if (syncInProgress)
+    {
+      display.print(F("SYNCING"));
       for (int i = 0; i < (millis() / 500) % 4; i++)
         display.print('.');
     }
@@ -1173,7 +1208,6 @@ void handleRFIDScan()
   char rfidBuffer[11];
   uidToString(rfidReader.uid.uidByte, rfidReader.uid.size, rfidBuffer);
 
-  // Debounce check
   if (strcmp(rfidBuffer, lastUID) == 0 && millis() - lastScanTime < DEBOUNCE_TIME)
   {
     rfidReader.PICC_HaltA();
@@ -1185,11 +1219,9 @@ void handleRFIDScan()
   strcpy(lastUID, rfidBuffer);
   lastScanTime = millis();
 
-  // Quick feedback
   showOLED(F("RFID"), rfidBuffer);
   playToneNotify();
 
-  // Process attendance
   char message[32];
   bool success = kirimPresensi(rfidBuffer, message);
 
@@ -1317,14 +1349,14 @@ void loop()
 {
   unsigned long currentMillis = millis();
 
-  // Task 1: RFID Reading (Highest Priority)
   if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial())
   {
     handleRFIDScan();
     return;
   }
 
-  // Task 2: Display Update (Medium Priority - 500ms interval)
+  processReconnect();
+
   if (currentMillis - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL)
   {
     lastDisplayUpdate = currentMillis;
@@ -1332,27 +1364,34 @@ void loop()
     updateStandbySignal();
   }
 
-  // Task 3: Periodic Background Tasks (Low Priority - 1s interval)
   if (currentMillis - lastPeriodicCheck >= PERIODIC_CHECK_INTERVAL)
   {
     lastPeriodicCheck = currentMillis;
 
-    // Chunked sync
-    if (syncInProgress || (currentMillis - lastSyncTime >= SYNC_INTERVAL))
+    if (WiFi.status() == WL_CONNECTED && sdCardAvailable)
     {
-      if (!syncInProgress)
-        lastSyncTime = currentMillis;
-      chunkedSync();
+      if (syncInProgress)
+      {
+        chunkedSync();
+      }
+      else if (currentMillis - lastSyncTime >= SYNC_INTERVAL)
+      {
+        int pending = countAllOfflineRecords();
+        if (pending > 0)
+        {
+          lastSyncTime = currentMillis;
+          chunkedSync();
+        }
+        else
+        {
+          lastSyncTime = currentMillis;
+        }
+      }
     }
 
-    // WiFi reconnect
-    processReconnect();
-
-    // Time sync
     periodicTimeSync();
   }
 
-  // Sleep mode check
   struct tm timeInfo;
   if (getTimeWithFallback(&timeInfo))
   {
@@ -1389,7 +1428,7 @@ void loop()
       snprintf(messageBuffer, sizeof(messageBuffer), "%d Jam %d Menit",
                sleepSeconds / 3600, (sleepSeconds % 3600) / 60);
       showOLED(F("SLEEP FOR"), messageBuffer);
-      delay(30000);
+      delay(3000);
 
       display.clearDisplay();
       display.display();
@@ -1399,4 +1438,6 @@ void loop()
       esp_deep_sleep_start();
     }
   }
+
+  yield();
 }
