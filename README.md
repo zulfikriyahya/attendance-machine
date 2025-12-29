@@ -262,15 +262,27 @@ Edit configuration constants in firmware source:
 
 ```cpp
 // Network Settings
-const char WIFI_SSID[] = "Your_SSID";
-const char WIFI_PASSWORD[] = "Your_Password";
-const char API_BASE_URL[] = "https://your-server.com";
-const char API_SECRET_KEY[] = "Your_Secret_Key";
+const char WIFI_SSID_1[] PROGMEM = "SSID_WIFI_1";
+const char WIFI_SSID_2[] PROGMEM = "SSID_WIFI_2";
+const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
+const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi1";
+const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
+const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
+const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
+const char NTP_SERVER_2[] PROGMEM = "time.google.com";
+const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
 
 // Queue Settings
 const int MAX_RECORDS_PER_FILE = 50;
-const unsigned long SYNC_INTERVAL = 300000; // 5 minutes
-const unsigned long RECONNECT_INTERVAL = 300000; // 5 minutes
+const int MAX_QUEUE_FILES = 1000;
+const unsigned long SYNC_INTERVAL = 300000;
+const unsigned long MAX_OFFLINE_AGE = 2592000;
+const unsigned long MIN_REPEAT_INTERVAL = 1800;
+const unsigned long TIME_SYNC_INTERVAL = 3600000;
+const unsigned long RECONNECT_INTERVAL = 300000;
+const int SLEEP_START_HOUR = 18;
+const int SLEEP_END_HOUR = 5;
+const long GMT_OFFSET_SEC = 25200;
 ```
 
 ### Library Dependencies
@@ -316,15 +328,6 @@ Contributions are welcome! Please follow these guidelines:
 - **Queue Capacity:** Up to 50,000 records (1000 files × 50 records)
 - **Time Sync Accuracy:** ±1 second (NTP-based)
 - **Power Consumption:** ~150mA active, <5mA deep sleep
-
-## Best Practices for Developers
-
-1. **Never Block Main Loop:** All network operations must be non-blocking
-2. **Use Flags Consistently:** Always check and set operation flags
-3. **Minimal Display Updates:** Only update OLED for critical information
-4. **Silent by Default:** No audio/visual feedback for background processes
-5. **Error Handling:** Graceful degradation, never crash on network errors
-6. **Memory Management:** Use static buffers, avoid dynamic allocation
 
 ## Lisensi
 
