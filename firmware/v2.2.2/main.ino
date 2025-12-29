@@ -92,6 +92,22 @@ bool isOnline = false;
 bool sdCardAvailable = false;
 String deviceId = "ESP32_";
 
+// DUPLICATE CHECK CACHE
+struct DuplicateCache
+{
+  char rfid[11];
+  unsigned long unixTime;
+};
+
+const int CACHE_SIZE = 20;
+DuplicateCache duplicateCache[CACHE_SIZE];
+int cacheIndex = 0;
+bool cacheInitialized = false;
+
+// RACE CONDITION PROTECTION
+volatile bool isWritingToQueue = false;
+volatile bool isReadingQueue = false;
+
 // BACKGROUND PROCESS FLAGS
 bool isSyncing = false;
 bool isReconnecting = false;
@@ -115,7 +131,7 @@ void playStartupMelody();
 void fatalError(const __FlashStringHelper *errorMessage);
 
 // ========================================
-// SD CARD HELPERS (SdFat Optimized)
+// SD CARD HELPERS
 // ========================================
 inline void selectSD()
 {
@@ -243,17 +259,131 @@ bool initSDCard()
 // ========================================
 // DUPLICATE CHECK
 // ========================================
+bool isDuplicateInCache(const char *rfid, unsigned long currentUnixTime)
+{
+  for (int i = 0; i < CACHE_SIZE; i++)
+  {
+    if (duplicateCache[i].rfid[0] != '\0' &&
+        strcmp(duplicateCache[i].rfid, rfid) == 0)
+    {
+      if (currentUnixTime - duplicateCache[i].unixTime < MIN_REPEAT_INTERVAL)
+      {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void addToCache(const char *rfid, unsigned long unixTime)
+{
+  strncpy(duplicateCache[cacheIndex].rfid, rfid, 10);
+  duplicateCache[cacheIndex].rfid[10] = '\0';
+  duplicateCache[cacheIndex].unixTime = unixTime;
+
+  cacheIndex = (cacheIndex + 1) % CACHE_SIZE;
+}
+
+void initializeCacheFromQueue()
+{
+  if (!sdCardAvailable)
+    return;
+  for (int i = 0; i < CACHE_SIZE; i++)
+  {
+    duplicateCache[i].rfid[0] = '\0';
+    duplicateCache[i].unixTime = 0;
+  }
+  cacheIndex = 0;
+
+  selectSD();
+  int filesToCheck[2];
+  filesToCheck[0] = currentQueueFile;
+  filesToCheck[1] = (currentQueueFile == 0) ? MAX_QUEUE_FILES - 1 : currentQueueFile - 1;
+
+  int cachePopulated = 0;
+  for (int idx = 0; idx < 2 && cachePopulated < CACHE_SIZE; idx++)
+  {
+    int fileNum = filesToCheck[idx];
+    String filename = getQueueFileName(fileNum);
+
+    if (!sd.exists(filename.c_str()))
+      continue;
+    if (!file.open(filename.c_str(), O_RDONLY))
+      continue;
+
+    char line[128];
+    if (file.available())
+      file.fgets(line, sizeof(line));
+    struct TempRecord
+    {
+      char rfid[11];
+      unsigned long unixTime;
+    };
+    TempRecord tempRecords[MAX_RECORDS_PER_FILE];
+    int tempCount = 0;
+
+    while (file.fgets(line, sizeof(line)) > 0 && tempCount < MAX_RECORDS_PER_FILE)
+    {
+      String lineStr = String(line);
+      lineStr.trim();
+      if (lineStr.length() < 10)
+        continue;
+
+      int firstComma = lineStr.indexOf(',');
+      int thirdComma = lineStr.lastIndexOf(',');
+
+      if (firstComma > 0 && thirdComma > 0)
+      {
+        String fileRfid = lineStr.substring(0, firstComma);
+        unsigned long fileUnixTime = lineStr.substring(thirdComma + 1).toInt();
+
+        fileRfid.toCharArray(tempRecords[tempCount].rfid, 11);
+        tempRecords[tempCount].unixTime = fileUnixTime;
+        tempCount++;
+      }
+    }
+    file.close();
+    for (int i = tempCount - 1; i >= 0 && cachePopulated < CACHE_SIZE; i--)
+    {
+      strncpy(duplicateCache[cachePopulated].rfid, tempRecords[i].rfid, 10);
+      duplicateCache[cachePopulated].rfid[10] = '\0';
+      duplicateCache[cachePopulated].unixTime = tempRecords[i].unixTime;
+      cachePopulated++;
+    }
+  }
+
+  deselectSD();
+  cacheInitialized = true;
+}
+
 bool isDuplicateInAllQueues(const char *rfid, unsigned long currentUnixTime)
 {
+  if (isDuplicateInCache(rfid, currentUnixTime))
+  {
+    return true;
+  }
+
   if (!sdCardAvailable)
     return false;
 
-  selectSD();
-  int startFile = max(0, currentQueueFile - 2);
-
-  for (int i = startFile; i <= currentQueueFile; i++)
+  while (isReadingQueue)
   {
-    String filename = getQueueFileName(i);
+    delay(10);
+  }
+  isReadingQueue = true;
+
+  selectSD();
+
+  int startFile = (currentQueueFile == 0) ? MAX_QUEUE_FILES - 1 : currentQueueFile - 1;
+  int endFile = currentQueueFile;
+
+  bool found = false;
+
+  for (int fileIdx = startFile; fileIdx <= endFile; fileIdx++)
+  {
+    int actualFileIdx = fileIdx % MAX_QUEUE_FILES;
+    String filename = getQueueFileName(actualFileIdx);
+
     if (!sd.exists(filename.c_str()))
       continue;
     if (!file.open(filename.c_str(), O_RDONLY))
@@ -282,18 +412,22 @@ bool isDuplicateInAllQueues(const char *rfid, unsigned long currentUnixTime)
         {
           if (currentUnixTime - fileUnixTime < MIN_REPEAT_INTERVAL)
           {
-            file.close();
-            deselectSD();
-            return true;
+            found = true;
+            break;
           }
         }
       }
     }
+
     file.close();
+    if (found)
+      break;
   }
 
   deselectSD();
-  return false;
+  isReadingQueue = false;
+
+  return found;
 }
 
 // ========================================
@@ -303,8 +437,18 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 {
   if (!sdCardAvailable)
     return false;
+
+  while (isWritingToQueue || isReadingQueue)
+  {
+    delay(10);
+  }
+  isWritingToQueue = true;
+
   if (isDuplicateInAllQueues(rfid, unixTime))
+  {
+    isWritingToQueue = false;
     return false;
+  }
 
   selectSD();
 
@@ -326,6 +470,8 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 
   int currentCount = _countRecordsInternal(currentFile);
 
+  int previousQueueFile = currentQueueFile;
+
   if (currentCount >= MAX_RECORDS_PER_FILE)
   {
     currentQueueFile = (currentQueueFile + 1) % MAX_QUEUE_FILES;
@@ -339,15 +485,22 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
     if (!file.open(currentFile.c_str(), O_WRONLY | O_CREAT))
     {
       deselectSD();
+      isWritingToQueue = false;
       return false;
     }
     file.println("rfid,timestamp,device_id,unix_time");
     file.close();
+
+    deselectSD();
+    cacheInitialized = false;
+    initializeCacheFromQueue();
+    selectSD();
   }
 
   if (!file.open(currentFile.c_str(), O_WRONLY | O_APPEND))
   {
     deselectSD();
+    isWritingToQueue = false;
     return false;
   }
 
@@ -363,6 +516,10 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
   file.close();
 
   deselectSD();
+
+  addToCache(rfid, unixTime);
+
+  isWritingToQueue = false;
   return true;
 }
 
@@ -483,8 +640,12 @@ bool syncAllQueues()
   if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
     return false;
 
-  isSyncing = true;
+  while (isWritingToQueue)
+  {
+    delay(10);
+  }
 
+  isSyncing = true;
   int totalSynced = 0;
 
   for (int i = 0; i < MAX_QUEUE_FILES; i++)
@@ -527,10 +688,12 @@ bool syncAllQueues()
       }
     }
     deselectSD();
+
+    cacheInitialized = false;
+    initializeCacheFromQueue();
   }
 
   isSyncing = false;
-
   return totalSynced > 0;
 }
 
@@ -1011,6 +1174,9 @@ void setup()
     playToneSuccess();
     delay(800);
 
+    showProgress(F("LOAD CACHE"), 1000);
+    initializeCacheFromQueue();
+
     int pending = countAllOfflineRecords();
     if (pending > 0)
     {
@@ -1101,14 +1267,42 @@ void loop()
   if (getTimeWithFallback(&timeInfo))
   {
     int h = timeInfo.tm_hour;
+
     if (h >= SLEEP_START_HOUR || h < SLEEP_END_HOUR)
     {
       showOLED(F("SLEEP MODE"), "...");
       delay(1000);
 
-      int sleepSec = (h >= SLEEP_START_HOUR) ? ((24 - h + SLEEP_END_HOUR) * 3600 - timeInfo.tm_min * 60) : ((SLEEP_END_HOUR - h) * 3600 - timeInfo.tm_min * 60);
+      int targetHour = SLEEP_END_HOUR;
+      int currentHour = timeInfo.tm_hour;
+      int currentMinute = timeInfo.tm_min;
+      int currentSecond = timeInfo.tm_sec;
 
-      esp_sleep_enable_timer_wakeup((uint64_t)sleepSec * 1000000ULL);
+      int sleepSeconds;
+
+      if (currentHour >= SLEEP_START_HOUR)
+      {
+        sleepSeconds = ((24 - currentHour) * 3600) +
+                       (targetHour * 3600) -
+                       (currentMinute * 60 + currentSecond);
+      }
+      else
+      {
+        sleepSeconds = ((targetHour - currentHour) * 3600) -
+                       (currentMinute * 60 + currentSecond);
+      }
+
+      if (sleepSeconds < 60)
+        sleepSeconds = 60;
+      if (sleepSeconds > 43200)
+        sleepSeconds = 43200;
+
+      snprintf(messageBuffer, sizeof(messageBuffer), "%dh %dm",
+               sleepSeconds / 3600, (sleepSeconds % 3600) / 60);
+      showOLED(F("SLEEP FOR"), messageBuffer);
+      delay(2000);
+
+      esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
       esp_deep_sleep_start();
     }
   }
