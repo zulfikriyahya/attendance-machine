@@ -12,7 +12,7 @@
  * - Cached record counter untuk performa
  * - Display buffer untuk reduce redraw
  * - Chunked sync dengan state machine
- * - Limited duplicate check (hanya 2 file terakhir)
+ * - Limited duplicate check
  * - Async cache initialization
  * - Shorter HTTP timeout
  * - Task scheduling di main loop
@@ -58,17 +58,17 @@ const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
 // QUEUE SYSTEM CONFIG
 const int MAX_RECORDS_PER_FILE = 50;
 const int MAX_QUEUE_FILES = 1000;
-const unsigned long SYNC_INTERVAL = 10000;
-const unsigned long MAX_OFFLINE_AGE = 2592000;
-const unsigned long MIN_REPEAT_INTERVAL = 1800;
-const unsigned long TIME_SYNC_INTERVAL = 3600000;
-const unsigned long RECONNECT_INTERVAL = 10000;
-const int SLEEP_START_HOUR = 23;
+const unsigned long SYNC_INTERVAL = 30000;        // 10 detik
+const unsigned long MAX_OFFLINE_AGE = 2592000;    // 1 bulan
+const unsigned long MIN_REPEAT_INTERVAL = 1800;   // 30 detik
+const unsigned long TIME_SYNC_INTERVAL = 3600000; // 1 jam
+const unsigned long RECONNECT_INTERVAL = 30000;   // 30 detik
+const int SLEEP_START_HOUR = 18;
 const int SLEEP_END_HOUR = 5;
 const long GMT_OFFSET_SEC = 25200;
 
 // OPTIMASI CONFIG
-const unsigned long COUNT_CACHE_DURATION = 10000; // 10 detik
+const unsigned long COUNT_CACHE_DURATION = 30000; // 30 detik
 const int MAX_SYNC_FILES_PER_CYCLE = 2;
 const unsigned long MAX_SYNC_TIME = 5000;           // 5 detik per cycle
 const unsigned long DISPLAY_UPDATE_INTERVAL = 500;  // 500ms
@@ -1472,7 +1472,7 @@ void loop()
   if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial())
   {
     handleRFIDScan();
-    return; // Skip other tasks saat ada scan
+    return; // Skip tugas lain saat ada scan
   }
 
   // Task 2: Display Update (Medium Priority - 500ms interval)
