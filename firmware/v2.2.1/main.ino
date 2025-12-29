@@ -1,21 +1,21 @@
 /*
  * ======================================================================================
- * SISTEM PRESENSI PINTAR (RFID) - QUEUE SYSTEM v2.2.0 ULTIMATE
+ * SISTEM PRESENSI PINTAR (RFID) - QUEUE SYSTEM v2.2.1 ULTIMATE
  * ======================================================================================
  * Device  : ESP32-C3 Super Mini
  * Author  : Yahya Zulfikri
  * Created : Juli 2025
  * Updated : Desember 2025
- * Version : 2.2.0
+ * Version : 2.2.1
  *
- * CHANGELOG v2.2.0:
+ * CHANGELOG v2.2.1:
  * - Support Legacy Memory Card 128 MB
  * - Progress bar & visual feedback yang lebih baik
  * - Periodic time sync untuk akurasi waktu
  * - Fatal error handler untuk debugging
  * - Memory efficient dengan buffered I/O
  * - Faster operations & better user experience
- * - Auto-reconnect WiFi setiap 30 detik
+ * - Auto-reconnect WiFi setiap 300 detik
  * - Auto-restart jika ping API gagal
  * ======================================================================================
  */
@@ -59,12 +59,12 @@ const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
 // QUEUE SYSTEM CONFIG
 const int MAX_RECORDS_PER_FILE = 50;
 const int MAX_QUEUE_FILES = 1000;
-const unsigned long SYNC_INTERVAL = 60000;
+const unsigned long SYNC_INTERVAL = 300000;
 const unsigned long MAX_OFFLINE_AGE = 2592000;
 const unsigned long MIN_REPEAT_INTERVAL = 1800;
 const unsigned long TIME_SYNC_INTERVAL = 3600000;
-const unsigned long RECONNECT_INTERVAL = 30000;
-const int SLEEP_START_HOUR = 23;
+const unsigned long RECONNECT_INTERVAL = 300000;
+const int SLEEP_START_HOUR = 18;
 const int SLEEP_END_HOUR = 5;
 const long GMT_OFFSET_SEC = 25200;
 
