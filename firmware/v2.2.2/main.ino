@@ -1003,7 +1003,7 @@ void showStartupAnimation()
   const char title[] PROGMEM = "ZEDLABS";
   const char subtitle1[] PROGMEM = "INNOVATE BEYOND";
   const char subtitle2[] PROGMEM = "LIMITS";
-  const char version[] PROGMEM = "v2.2.2 ULTIMATE";
+  const char version[] PROGMEM = "v2.2.2";
 
   const int titleLength = 7;
   const int titleX = (SCREEN_WIDTH - (titleLength * 12)) / 2;
