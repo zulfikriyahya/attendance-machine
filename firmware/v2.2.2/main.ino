@@ -9,15 +9,14 @@
  * Version : 2.2.2
  *
  * CHANGELOG v2.2.2:
- * - Support Legacy Memory Card 128 MB
- * - Progress bar & visual feedback yang lebih baik
- * - Periodic time sync untuk akurasi waktu
- * - Fatal error handler untuk debugging
- * - Memory efficient dengan buffered I/O
- * - Faster operations & better user experience
- * - Auto-reconnect WiFi
- * - Auto-restart jika ping API gagal
- * - Background reconnect & sync tanpa mengganggu tapping
+ * - Cached record counter untuk performa
+ * - Display buffer untuk reduce redraw
+ * - Chunked sync dengan state machine
+ * - Limited duplicate check (hanya 2 file terakhir)
+ * - Async cache initialization
+ * - Shorter HTTP timeout
+ * - Task scheduling di main loop
+ * - Fast RFID handler
  * ======================================================================================
  */
 
@@ -38,7 +37,6 @@
 #define PIN_RFID_SS 7
 #define PIN_RFID_RST 3
 #define PIN_SD_CS 1
-
 #define PIN_OLED_SDA 8
 #define PIN_OLED_SCL 9
 #define PIN_BUZZER 10
@@ -69,6 +67,14 @@ const int SLEEP_START_HOUR = 18;
 const int SLEEP_END_HOUR = 5;
 const long GMT_OFFSET_SEC = 25200;
 
+// OPTIMASI CONFIG
+const unsigned long COUNT_CACHE_DURATION = 30000; // 30 detik
+const int MAX_SYNC_FILES_PER_CYCLE = 2;
+const unsigned long MAX_SYNC_TIME = 5000;           // 5 detik per cycle
+const unsigned long DISPLAY_UPDATE_INTERVAL = 500;  // 500ms
+const unsigned long PERIODIC_CHECK_INTERVAL = 1000; // 1 detik
+const int MAX_DUPLICATE_CHECK_LINES = 100;          // Batasi pembacaan file
+
 // RTC MEMORY
 RTC_DATA_ATTR time_t lastValidTime = 0;
 RTC_DATA_ATTR bool timeWasSynced = false;
@@ -87,10 +93,54 @@ unsigned long lastScanTime = 0;
 unsigned long lastSyncTime = 0;
 unsigned long lastTimeSyncAttempt = 0;
 unsigned long lastReconnectAttempt = 0;
+unsigned long lastDisplayUpdate = 0;
+unsigned long lastPeriodicCheck = 0;
 char messageBuffer[64];
 bool isOnline = false;
 bool sdCardAvailable = false;
 String deviceId = "ESP32_";
+
+// OPTIMASI 1: Cached Record Counter
+int cachedRecordCount = -1;
+unsigned long lastCountUpdate = 0;
+
+// OPTIMASI 2: Display Buffer
+struct DisplayState
+{
+  bool isOnline;
+  char time[6];
+  int pendingRecords;
+  int wifiSignal;
+  bool needsUpdate;
+};
+
+DisplayState currentDisplay = {false, "00:00", 0, 0, true};
+DisplayState previousDisplay = {false, "00:00", 0, 0, false};
+
+// OPTIMASI 3: Chunked Sync State Machine
+int syncCurrentFile = 0;
+bool syncInProgress = false;
+unsigned long syncStartTime = 0;
+
+// OPTIMASI 5: Async Cache Init
+bool cacheInitInProgress = false;
+int cacheInitFileIndex = 0;
+
+// NON-BLOCKING RECONNECT STATE MACHINE
+enum ReconnectState
+{
+  RECONNECT_IDLE,
+  RECONNECT_TRYING_SSID1,
+  RECONNECT_TRYING_SSID2,
+  RECONNECT_SUCCESS,
+  RECONNECT_FAILED
+};
+
+ReconnectState reconnectState = RECONNECT_IDLE;
+int reconnectRetryCount = 0;
+unsigned long reconnectStartTime = 0;
+const int MAX_RECONNECT_RETRY = 20;
+const int RECONNECT_RETRY_DELAY = 300;
 
 // DUPLICATE CHECK CACHE
 struct DuplicateCache
@@ -129,6 +179,15 @@ void playToneError();
 void playToneNotify();
 void playStartupMelody();
 void fatalError(const __FlashStringHelper *errorMessage);
+void handleRFIDScan();
+void updateCurrentDisplayState();
+void updateStandbySignal();
+
+// ========================================
+// OPTIMASI 1: Cached Record Counter
+// ========================================
+int getCachedRecordCount();
+void invalidateRecordCountCache();
 
 // ========================================
 // SD CARD HELPERS
@@ -201,6 +260,23 @@ int countAllOfflineRecords()
 
   deselectSD();
   return total;
+}
+
+// OPTIMASI 1: Implementasi Cached Counter
+int getCachedRecordCount()
+{
+  if (cachedRecordCount < 0 ||
+      millis() - lastCountUpdate > COUNT_CACHE_DURATION)
+  {
+    cachedRecordCount = countAllOfflineRecords();
+    lastCountUpdate = millis();
+  }
+  return cachedRecordCount;
+}
+
+void invalidateRecordCountCache()
+{
+  cachedRecordCount = -1;
 }
 
 // ========================================
@@ -280,89 +356,102 @@ void addToCache(const char *rfid, unsigned long unixTime)
   strncpy(duplicateCache[cacheIndex].rfid, rfid, 10);
   duplicateCache[cacheIndex].rfid[10] = '\0';
   duplicateCache[cacheIndex].unixTime = unixTime;
-
   cacheIndex = (cacheIndex + 1) % CACHE_SIZE;
 }
 
-void initializeCacheFromQueue()
+// OPTIMASI 5: Async Cache Initialization
+void asyncInitializeCache()
 {
-  if (!sdCardAvailable)
+  if (!sdCardAvailable || cacheInitialized)
     return;
-  for (int i = 0; i < CACHE_SIZE; i++)
+
+  if (!cacheInitInProgress)
   {
-    duplicateCache[i].rfid[0] = '\0';
-    duplicateCache[i].unixTime = 0;
+    cacheInitInProgress = true;
+    cacheInitFileIndex = 0;
+    for (int i = 0; i < CACHE_SIZE; i++)
+    {
+      duplicateCache[i].rfid[0] = '\0';
+      duplicateCache[i].unixTime = 0;
+    }
+    cacheIndex = 0;
   }
-  cacheIndex = 0;
 
-  selectSD();
-  int filesToCheck[2];
-  filesToCheck[0] = currentQueueFile;
-  filesToCheck[1] = (currentQueueFile == 0) ? MAX_QUEUE_FILES - 1 : currentQueueFile - 1;
-
-  int cachePopulated = 0;
-  for (int idx = 0; idx < 2 && cachePopulated < CACHE_SIZE; idx++)
+  if (cacheInitFileIndex < 2)
   {
-    int fileNum = filesToCheck[idx];
+    selectSD();
+
+    int fileNum = (cacheInitFileIndex == 0) ? currentQueueFile : (currentQueueFile == 0 ? MAX_QUEUE_FILES - 1 : currentQueueFile - 1);
+
     String filename = getQueueFileName(fileNum);
 
-    if (!sd.exists(filename.c_str()))
-      continue;
-    if (!file.open(filename.c_str(), O_RDONLY))
-      continue;
-
-    char line[128];
-    if (file.available())
-      file.fgets(line, sizeof(line));
-    struct TempRecord
+    if (sd.exists(filename.c_str()) && file.open(filename.c_str(), O_RDONLY))
     {
-      char rfid[11];
-      unsigned long unixTime;
-    };
-    TempRecord tempRecords[MAX_RECORDS_PER_FILE];
-    int tempCount = 0;
+      char line[128];
+      if (file.available())
+        file.fgets(line, sizeof(line));
 
-    while (file.fgets(line, sizeof(line)) > 0 && tempCount < MAX_RECORDS_PER_FILE)
-    {
-      String lineStr = String(line);
-      lineStr.trim();
-      if (lineStr.length() < 10)
-        continue;
-
-      int firstComma = lineStr.indexOf(',');
-      int thirdComma = lineStr.lastIndexOf(',');
-
-      if (firstComma > 0 && thirdComma > 0)
+      struct TempRecord
       {
-        String fileRfid = lineStr.substring(0, firstComma);
-        unsigned long fileUnixTime = lineStr.substring(thirdComma + 1).toInt();
+        char rfid[11];
+        unsigned long unixTime;
+      };
+      TempRecord tempRecords[MAX_RECORDS_PER_FILE];
+      int tempCount = 0;
 
-        fileRfid.toCharArray(tempRecords[tempCount].rfid, 11);
-        tempRecords[tempCount].unixTime = fileUnixTime;
-        tempCount++;
+      while (file.fgets(line, sizeof(line)) > 0 && tempCount < MAX_RECORDS_PER_FILE)
+      {
+        String lineStr = String(line);
+        lineStr.trim();
+        if (lineStr.length() < 10)
+          continue;
+
+        int firstComma = lineStr.indexOf(',');
+        int thirdComma = lineStr.lastIndexOf(',');
+
+        if (firstComma > 0 && thirdComma > 0)
+        {
+          String fileRfid = lineStr.substring(0, firstComma);
+          unsigned long fileUnixTime = lineStr.substring(thirdComma + 1).toInt();
+
+          fileRfid.toCharArray(tempRecords[tempCount].rfid, 11);
+          tempRecords[tempCount].unixTime = fileUnixTime;
+          tempCount++;
+        }
       }
-    }
-    file.close();
-    for (int i = tempCount - 1; i >= 0 && cachePopulated < CACHE_SIZE; i--)
-    {
-      strncpy(duplicateCache[cachePopulated].rfid, tempRecords[i].rfid, 10);
-      duplicateCache[cachePopulated].rfid[10] = '\0';
-      duplicateCache[cachePopulated].unixTime = tempRecords[i].unixTime;
-      cachePopulated++;
-    }
-  }
+      file.close();
 
-  deselectSD();
-  cacheInitialized = true;
+      int cachePopulated = cacheIndex;
+      for (int i = tempCount - 1; i >= 0 && cachePopulated < CACHE_SIZE; i--)
+      {
+        strncpy(duplicateCache[cachePopulated].rfid, tempRecords[i].rfid, 10);
+        duplicateCache[cachePopulated].rfid[10] = '\0';
+        duplicateCache[cachePopulated].unixTime = tempRecords[i].unixTime;
+        cachePopulated++;
+      }
+      cacheIndex = cachePopulated;
+    }
+
+    deselectSD();
+    cacheInitFileIndex++;
+  }
+  else
+  {
+    cacheInitialized = true;
+    cacheInitInProgress = false;
+  }
 }
 
-bool isDuplicateInAllQueues(const char *rfid, unsigned long currentUnixTime)
+// OPTIMASI 4: Limited Duplicate Check (hanya 2 file terakhir)
+bool isDuplicateLimited(const char *rfid, unsigned long currentUnixTime)
 {
+  // 1. Cek cache dulu (super cepat)
   if (isDuplicateInCache(rfid, currentUnixTime))
   {
     return true;
   }
 
+  // 2. Hanya cek 2 file terakhir
   if (!sdCardAvailable)
     return false;
 
@@ -373,16 +462,12 @@ bool isDuplicateInAllQueues(const char *rfid, unsigned long currentUnixTime)
   isReadingQueue = true;
 
   selectSD();
-
-  int startFile = (currentQueueFile == 0) ? MAX_QUEUE_FILES - 1 : currentQueueFile - 1;
-  int endFile = currentQueueFile;
-
   bool found = false;
 
-  for (int fileIdx = startFile; fileIdx <= endFile; fileIdx++)
+  for (int offset = 0; offset <= 1; offset++)
   {
-    int actualFileIdx = fileIdx % MAX_QUEUE_FILES;
-    String filename = getQueueFileName(actualFileIdx);
+    int fileIdx = (currentQueueFile - offset + MAX_QUEUE_FILES) % MAX_QUEUE_FILES;
+    String filename = getQueueFileName(fileIdx);
 
     if (!sd.exists(filename.c_str()))
       continue;
@@ -393,12 +478,11 @@ bool isDuplicateInAllQueues(const char *rfid, unsigned long currentUnixTime)
     if (file.available())
       file.fgets(line, sizeof(line));
 
-    while (file.fgets(line, sizeof(line)) > 0)
+    int linesRead = 0;
+    while (file.fgets(line, sizeof(line)) > 0 && linesRead < MAX_DUPLICATE_CHECK_LINES)
     {
       String lineStr = String(line);
       lineStr.trim();
-      if (lineStr.length() < 10)
-        continue;
 
       int firstComma = lineStr.indexOf(',');
       int thirdComma = lineStr.lastIndexOf(',');
@@ -417,6 +501,7 @@ bool isDuplicateInAllQueues(const char *rfid, unsigned long currentUnixTime)
           }
         }
       }
+      linesRead++;
     }
 
     file.close();
@@ -444,7 +529,7 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
   }
   isWritingToQueue = true;
 
-  if (isDuplicateInAllQueues(rfid, unixTime))
+  if (isDuplicateLimited(rfid, unixTime))
   {
     isWritingToQueue = false;
     return false;
@@ -470,8 +555,6 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 
   int currentCount = _countRecordsInternal(currentFile);
 
-  int previousQueueFile = currentQueueFile;
-
   if (currentCount >= MAX_RECORDS_PER_FILE)
   {
     currentQueueFile = (currentQueueFile + 1) % MAX_QUEUE_FILES;
@@ -493,7 +576,7 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 
     deselectSD();
     cacheInitialized = false;
-    initializeCacheFromQueue();
+    asyncInitializeCache();
     selectSD();
   }
 
@@ -578,6 +661,7 @@ bool readQueueFile(const String &filename, OfflineRecord *records, int *count, i
   return *count > 0;
 }
 
+// OPTIMASI 6: Shorter HTTP Timeout
 bool syncQueueFile(const String &filename)
 {
   if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
@@ -595,7 +679,8 @@ bool syncQueueFile(const String &filename)
   }
 
   HTTPClient http;
-  http.setTimeout(30000);
+  http.setTimeout(10000);       // 10 detik (lebih pendek dari 30)
+  http.setConnectTimeout(3000); // 3 detik untuk connect
 
   char url[80];
   strcpy_P(url, API_BASE_URL);
@@ -635,83 +720,56 @@ bool syncQueueFile(const String &filename)
   return false;
 }
 
-bool syncAllQueues()
+// OPTIMASI 3: Chunked Sync dengan State Machine
+void chunkedSync()
 {
   if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
-    return false;
-
-  while (isWritingToQueue)
   {
-    delay(10);
+    syncInProgress = false;
+    return;
   }
 
-  isSyncing = true;
-  int totalSynced = 0;
-
-  for (int i = 0; i < MAX_QUEUE_FILES; i++)
+  if (!syncInProgress)
   {
-    String filename = getQueueFileName(i);
+    syncInProgress = true;
+    syncCurrentFile = 0;
+    syncStartTime = millis();
+  }
+
+  int filesSynced = 0;
+
+  while (syncCurrentFile < MAX_QUEUE_FILES &&
+         filesSynced < MAX_SYNC_FILES_PER_CYCLE &&
+         millis() - syncStartTime < MAX_SYNC_TIME)
+  {
+
+    String filename = getQueueFileName(syncCurrentFile);
 
     selectSD();
     bool exists = sd.exists(filename.c_str());
     deselectSD();
 
-    if (!exists)
-      continue;
-
-    int fileRecords = countRecordsInFile(filename);
-    if (fileRecords == 0)
+    if (exists)
     {
-      selectSD();
-      sd.remove(filename.c_str());
-      deselectSD();
-      continue;
-    }
-
-    if (syncQueueFile(filename))
-    {
-      totalSynced += fileRecords;
-    }
-  }
-
-  if (totalSynced > 0)
-  {
-    currentQueueFile = 0;
-    String firstFile = getQueueFileName(0);
-    selectSD();
-    if (!sd.exists(firstFile.c_str()))
-    {
-      if (file.open(firstFile.c_str(), O_WRONLY | O_CREAT))
+      int records = countRecordsInFile(filename);
+      if (records > 0)
       {
-        file.println("rfid,timestamp,device_id,unix_time");
-        file.close();
+        if (syncQueueFile(filename))
+        {
+          filesSynced++;
+          invalidateRecordCountCache();
+        }
       }
     }
-    deselectSD();
 
-    cacheInitialized = false;
-    initializeCacheFromQueue();
+    syncCurrentFile++;
   }
 
-  isSyncing = false;
-  return totalSynced > 0;
-}
-
-void periodicSync()
-{
-  if (!sdCardAvailable)
-    return;
-  if (isSyncing)
-    return;
-  if (millis() - lastSyncTime < SYNC_INTERVAL)
-    return;
-
-  lastSyncTime = millis();
-  if (WiFi.status() == WL_CONNECTED)
+  // Selesai sync semua file
+  if (syncCurrentFile >= MAX_QUEUE_FILES)
   {
-    int pending = countAllOfflineRecords();
-    if (pending > 0)
-      syncAllQueues();
+    syncInProgress = false;
+    syncCurrentFile = 0;
   }
 }
 
@@ -832,34 +890,6 @@ bool connectToWiFi()
   return false;
 }
 
-bool connectToWiFiBackground()
-{
-  WiFi.mode(WIFI_STA);
-
-  for (int attempt = 0; attempt < 2; attempt++)
-  {
-    char ssid[16], password[16];
-    strcpy_P(ssid, attempt == 0 ? WIFI_SSID_1 : WIFI_SSID_2);
-    strcpy_P(password, attempt == 0 ? WIFI_PASSWORD_1 : WIFI_PASSWORD_2);
-
-    WiFi.begin(ssid, password);
-
-    for (int retry = 0; retry < 20 && WiFi.status() != WL_CONNECTED; retry++)
-    {
-      delay(300);
-    }
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-      isOnline = true;
-      return true;
-    }
-  }
-
-  isOnline = false;
-  return false;
-}
-
 bool pingAPI()
 {
   if (WiFi.status() != WL_CONNECTED)
@@ -883,6 +913,102 @@ bool pingAPI()
 }
 
 // ========================================
+// NON-BLOCKING WIFI RECONNECT
+// ========================================
+void processReconnect()
+{
+  switch (reconnectState)
+  {
+  case RECONNECT_IDLE:
+    if (WiFi.status() != WL_CONNECTED &&
+        millis() - lastReconnectAttempt >= RECONNECT_INTERVAL)
+    {
+      lastReconnectAttempt = millis();
+      reconnectState = RECONNECT_TRYING_SSID1;
+      reconnectRetryCount = 0;
+      reconnectStartTime = millis();
+
+      char ssid[16], password[16];
+      strcpy_P(ssid, WIFI_SSID_1);
+      strcpy_P(password, WIFI_PASSWORD_1);
+      WiFi.begin(ssid, password);
+    }
+    break;
+
+  case RECONNECT_TRYING_SSID1:
+    if (millis() - reconnectStartTime >= RECONNECT_RETRY_DELAY)
+    {
+      reconnectStartTime = millis();
+
+      if (WiFi.status() == WL_CONNECTED)
+      {
+        reconnectState = RECONNECT_SUCCESS;
+      }
+      else
+      {
+        reconnectRetryCount++;
+
+        if (reconnectRetryCount >= MAX_RECONNECT_RETRY)
+        {
+          reconnectState = RECONNECT_TRYING_SSID2;
+          reconnectRetryCount = 0;
+
+          char ssid[16], password[16];
+          strcpy_P(ssid, WIFI_SSID_2);
+          strcpy_P(password, WIFI_PASSWORD_2);
+          WiFi.begin(ssid, password);
+        }
+      }
+    }
+    break;
+
+  case RECONNECT_TRYING_SSID2:
+    if (millis() - reconnectStartTime >= RECONNECT_RETRY_DELAY)
+    {
+      reconnectStartTime = millis();
+
+      if (WiFi.status() == WL_CONNECTED)
+      {
+        reconnectState = RECONNECT_SUCCESS;
+      }
+      else
+      {
+        reconnectRetryCount++;
+
+        if (reconnectRetryCount >= MAX_RECONNECT_RETRY)
+        {
+          reconnectState = RECONNECT_FAILED;
+        }
+      }
+    }
+    break;
+
+  case RECONNECT_SUCCESS:
+    isOnline = true;
+
+    if (pingAPI())
+    {
+      if (sdCardAvailable && !syncInProgress)
+      {
+        int pending = getCachedRecordCount();
+        if (pending > 0)
+        {
+          chunkedSync();
+        }
+      }
+    }
+
+    reconnectState = RECONNECT_IDLE;
+    break;
+
+  case RECONNECT_FAILED:
+    isOnline = false;
+    reconnectState = RECONNECT_IDLE;
+    break;
+  }
+}
+
+// ========================================
 // RFID FUNCTIONS
 // ========================================
 void uidToString(uint8_t *uid, uint8_t length, char *output)
@@ -899,9 +1025,7 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
   }
 }
 
-// ========================================
-// KIRIM PRESENSI
-// ========================================
+// OPTIMASI 9: Kirim Presensi dengan Limited Check
 bool kirimPresensi(const char *rfidUID, char *message)
 {
   String timestamp = getFormattedTimestamp();
@@ -909,7 +1033,8 @@ bool kirimPresensi(const char *rfidUID, char *message)
 
   if (sdCardAvailable)
   {
-    if (isDuplicateInAllQueues(rfidUID, currentUnixTime))
+    // Gunakan isDuplicateLimited (hanya cek 2 file terakhir)
+    if (isDuplicateLimited(rfidUID, currentUnixTime))
     {
       strcpy(message, "CUKUP SEKALI!");
       return false;
@@ -918,6 +1043,7 @@ bool kirimPresensi(const char *rfidUID, char *message)
     if (saveToQueue(rfidUID, timestamp.c_str(), currentUnixTime))
     {
       strcpy(message, "DATA TERSIMPAN");
+      invalidateRecordCountCache();
       return true;
     }
     else
@@ -1000,7 +1126,7 @@ void showStartupAnimation()
   const int titleX = (SCREEN_WIDTH - (titleLength * 12)) / 2;
   const int sub1X = (SCREEN_WIDTH - 15 * 6) / 2;
   const int sub2X = (SCREEN_WIDTH - 6 * 6) / 2;
-  const int verX = (SCREEN_WIDTH - 12 * 6) / 2;
+  const int verX = (SCREEN_WIDTH - 16 * 6) / 2;
 
   for (int x = -80; x <= titleX; x += 4)
   {
@@ -1033,62 +1159,99 @@ void showStartupAnimation()
   delay(500);
 }
 
-void showStandbySignal()
+// OPTIMASI 10: Update Display State
+void updateCurrentDisplayState()
 {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-
-  display.setCursor(2, 2);
-  display.print(isOnline ? F("ONLINE") : F("OFFLINE"));
-
-  const char *tapText = "TAP KARTU";
-  int16_t x1, y1;
-  uint16_t w1, h1;
-  display.getTextBounds(tapText, 0, 0, &x1, &y1, &w1, &h1);
-  display.setCursor((SCREEN_WIDTH - w1) / 2, 20);
-  display.print(tapText);
+  currentDisplay.isOnline = (WiFi.status() == WL_CONNECTED);
 
   struct tm timeInfo;
   if (getTimeWithFallback(&timeInfo))
   {
-    snprintf(messageBuffer, sizeof(messageBuffer), "%02d:%02d", timeInfo.tm_hour, timeInfo.tm_min);
-    display.getTextBounds(messageBuffer, 0, 0, &x1, &y1, &w1, &h1);
-    display.setCursor((SCREEN_WIDTH - w1) / 2, 35);
-    display.print(messageBuffer);
+    snprintf(currentDisplay.time, sizeof(currentDisplay.time),
+             "%02d:%02d", timeInfo.tm_hour, timeInfo.tm_min);
   }
 
   if (sdCardAvailable)
   {
-    int pending = countAllOfflineRecords();
-    if (pending > 0)
-    {
-      snprintf(messageBuffer, sizeof(messageBuffer), "Q:%d", pending);
-      display.getTextBounds(messageBuffer, 0, 0, &x1, &y1, &w1, &h1);
-      display.setCursor((SCREEN_WIDTH - w1) / 2, 50);
-      display.print(messageBuffer);
-    }
+    currentDisplay.pendingRecords = getCachedRecordCount();
+  }
+  else
+  {
+    currentDisplay.pendingRecords = 0;
   }
 
   if (WiFi.status() == WL_CONNECTED)
   {
     long rssi = WiFi.RSSI();
-    int bars = (rssi > -67) ? 4 : (rssi > -70) ? 3
-                              : (rssi > -80)   ? 2
-                              : (rssi > -90)   ? 1
-                                               : 0;
-    for (int i = 0; i < 4; i++)
-    {
-      int h = 2 + i * 2;
-      int x = SCREEN_WIDTH - 18 + i * 5;
-      if (i < bars)
-        display.fillRect(x, 10 - h, 3, h, WHITE);
-      else
-        display.drawRect(x, 10 - h, 3, h, WHITE);
-    }
+    currentDisplay.wifiSignal = (rssi > -67) ? 4 : (rssi > -70) ? 3
+                                               : (rssi > -80)   ? 2
+                                               : (rssi > -90)   ? 1
+                                                                : 0;
   }
+  else
+  {
+    currentDisplay.wifiSignal = 0;
+  }
+}
 
-  display.display();
+// OPTIMASI 2: Display Buffer untuk Reduce Redraw
+void updateStandbySignal()
+{
+  // Hanya update jika ada perubahan
+  if (memcmp(&currentDisplay, &previousDisplay, sizeof(DisplayState)) != 0)
+  {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+
+    display.setCursor(2, 2);
+    if (reconnectState == RECONNECT_TRYING_SSID1 ||
+        reconnectState == RECONNECT_TRYING_SSID2)
+    {
+      display.print(F("RECONN"));
+      for (int i = 0; i < (millis() / 500) % 4; i++)
+        display.print('.');
+    }
+    else
+    {
+      display.print(currentDisplay.isOnline ? F("ONLINE") : F("OFFLINE"));
+    }
+
+    const char *tapText = "TAP KARTU";
+    int16_t x1, y1;
+    uint16_t w1, h1;
+    display.getTextBounds(tapText, 0, 0, &x1, &y1, &w1, &h1);
+    display.setCursor((SCREEN_WIDTH - w1) / 2, 20);
+    display.print(tapText);
+
+    display.getTextBounds(currentDisplay.time, 0, 0, &x1, &y1, &w1, &h1);
+    display.setCursor((SCREEN_WIDTH - w1) / 2, 35);
+    display.print(currentDisplay.time);
+
+    if (currentDisplay.pendingRecords > 0)
+    {
+      snprintf(messageBuffer, sizeof(messageBuffer), "Q:%d", currentDisplay.pendingRecords);
+      display.getTextBounds(messageBuffer, 0, 0, &x1, &y1, &w1, &h1);
+      display.setCursor((SCREEN_WIDTH - w1) / 2, 50);
+      display.print(messageBuffer);
+    }
+
+    if (currentDisplay.wifiSignal > 0)
+    {
+      for (int i = 0; i < 4; i++)
+      {
+        int h = 2 + i * 2;
+        int x = SCREEN_WIDTH - 18 + i * 5;
+        if (i < currentDisplay.wifiSignal)
+          display.fillRect(x, 10 - h, 3, h, WHITE);
+        else
+          display.drawRect(x, 10 - h, 3, h, WHITE);
+      }
+    }
+
+    display.display();
+    memcpy(&previousDisplay, &currentDisplay, sizeof(DisplayState));
+  }
 }
 
 // ========================================
@@ -1146,6 +1309,47 @@ void fatalError(const __FlashStringHelper *errorMessage)
   ESP.restart();
 }
 
+// OPTIMASI 8: Fast RFID Handler
+void handleRFIDScan()
+{
+  deselectSD();
+  digitalWrite(PIN_RFID_SS, LOW);
+
+  char rfidBuffer[11];
+  uidToString(rfidReader.uid.uidByte, rfidReader.uid.size, rfidBuffer);
+
+  // Debounce check
+  if (strcmp(rfidBuffer, lastUID) == 0 &&
+      millis() - lastScanTime < DEBOUNCE_TIME)
+  {
+    rfidReader.PICC_HaltA();
+    rfidReader.PCD_StopCrypto1();
+    digitalWrite(PIN_RFID_SS, HIGH);
+    return;
+  }
+
+  strcpy(lastUID, rfidBuffer);
+  lastScanTime = millis();
+
+  // Quick feedback
+  showOLED(F("RFID"), rfidBuffer);
+  playToneNotify();
+
+  // Process attendance
+  char message[32];
+  bool success = kirimPresensi(rfidBuffer, message);
+
+  showOLED(success ? F("BERHASIL") : F("INFO"), message);
+  success ? playToneSuccess() : playToneError();
+  delay(500);
+
+  rfidReader.PICC_HaltA();
+  rfidReader.PCD_StopCrypto1();
+  digitalWrite(PIN_RFID_SS, HIGH);
+
+  invalidateRecordCountCache();
+}
+
 // ========================================
 // SETUP
 // ========================================
@@ -1175,9 +1379,9 @@ void setup()
     delay(800);
 
     showProgress(F("LOAD CACHE"), 1000);
-    initializeCacheFromQueue();
+    asyncInitializeCache(); // Mulai async initialization
 
-    int pending = countAllOfflineRecords();
+    int pending = getCachedRecordCount();
     if (pending > 0)
     {
       snprintf(messageBuffer, sizeof(messageBuffer), "%d TERSISA", pending);
@@ -1219,13 +1423,13 @@ void setup()
 
       if (sdCardAvailable)
       {
-        int pending = countAllOfflineRecords();
+        int pending = getCachedRecordCount();
         if (pending > 0)
         {
           snprintf(messageBuffer, sizeof(messageBuffer), "%d records", pending);
           showOLED(F("SYNC DATA"), messageBuffer);
           delay(1000);
-          syncAllQueues();
+          chunkedSync(); // Gunakan chunked sync
         }
       }
     }
@@ -1253,16 +1457,59 @@ void setup()
   lastSyncTime = millis();
   lastTimeSyncAttempt = millis();
   lastReconnectAttempt = millis();
+  lastDisplayUpdate = millis();
+  lastPeriodicCheck = millis();
 }
 
 // ========================================
-// LOOP
+// OPTIMASI 7: LOOP dengan Task Scheduling
 // ========================================
 void loop()
 {
-  periodicTimeSync();
-  periodicSync();
+  unsigned long currentMillis = millis();
 
+  // Task 1: RFID Reading (Highest Priority - Always Check)
+  if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial())
+  {
+    handleRFIDScan();
+    return; // Skip other tasks saat ada scan
+  }
+
+  // Task 2: Display Update (Medium Priority - 500ms interval)
+  if (currentMillis - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL)
+  {
+    lastDisplayUpdate = currentMillis;
+    updateCurrentDisplayState();
+    updateStandbySignal(); // Hanya update jika ada perubahan
+  }
+
+  // Task 3: Periodic Background Tasks (Low Priority - 1s interval)
+  if (currentMillis - lastPeriodicCheck >= PERIODIC_CHECK_INTERVAL)
+  {
+    lastPeriodicCheck = currentMillis;
+
+    // Async cache init jika belum selesai
+    if (!cacheInitialized)
+    {
+      asyncInitializeCache();
+    }
+
+    // Chunked sync
+    if (syncInProgress || (currentMillis - lastSyncTime >= SYNC_INTERVAL))
+    {
+      if (!syncInProgress)
+        lastSyncTime = currentMillis;
+      chunkedSync();
+    }
+
+    // WiFi reconnect
+    processReconnect();
+
+    // Time sync
+    periodicTimeSync();
+  }
+
+  // Sleep mode check
   struct tm timeInfo;
   if (getTimeWithFallback(&timeInfo))
   {
@@ -1306,74 +1553,4 @@ void loop()
       esp_deep_sleep_start();
     }
   }
-
-  if (WiFi.status() != WL_CONNECTED && isOnline)
-  {
-    isOnline = false;
-  }
-  else if (WiFi.status() == WL_CONNECTED && !isOnline)
-  {
-    isOnline = pingAPI();
-  }
-
-  if (WiFi.status() != WL_CONNECTED &&
-      !isReconnecting &&
-      millis() - lastReconnectAttempt >= RECONNECT_INTERVAL)
-  {
-    lastReconnectAttempt = millis();
-    isReconnecting = true;
-
-    if (connectToWiFiBackground())
-    {
-      if (pingAPI())
-      {
-        if (sdCardAvailable && !isSyncing)
-        {
-          int pending = countAllOfflineRecords();
-          if (pending > 0)
-          {
-            syncAllQueues();
-          }
-        }
-      }
-    }
-
-    isReconnecting = false;
-  }
-
-  if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial())
-  {
-    deselectSD();
-    digitalWrite(PIN_RFID_SS, LOW);
-
-    uidToString(rfidReader.uid.uidByte, rfidReader.uid.size, messageBuffer);
-
-    if (strcmp(messageBuffer, lastUID) == 0 && millis() - lastScanTime < DEBOUNCE_TIME)
-    {
-      rfidReader.PICC_HaltA();
-      rfidReader.PCD_StopCrypto1();
-      digitalWrite(PIN_RFID_SS, HIGH);
-      return;
-    }
-
-    strcpy(lastUID, messageBuffer);
-    lastScanTime = millis();
-
-    showOLED(F("RFID"), messageBuffer);
-    playToneNotify();
-    delay(50);
-
-    char message[32];
-    bool success = kirimPresensi(messageBuffer, message);
-
-    showOLED(success ? F("BERHASIL") : F("INFO"), message);
-    success ? playToneSuccess() : playToneError();
-    delay(500);
-
-    rfidReader.PICC_HaltA();
-    rfidReader.PCD_StopCrypto1();
-    digitalWrite(PIN_RFID_SS, HIGH);
-  }
-
-  showStandbySignal();
 }
