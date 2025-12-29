@@ -9,7 +9,6 @@
  * Version : 2.2.2
  *
  * CHANGELOG v2.2.2:
- * - Cached record counter untuk performa
  * - Display buffer untuk reduce redraw
  * - Chunked sync dengan state machine
  * - Limited duplicate check
@@ -58,22 +57,21 @@ const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
 // QUEUE SYSTEM CONFIG
 const int MAX_RECORDS_PER_FILE = 50;
 const int MAX_QUEUE_FILES = 1000;
-const unsigned long SYNC_INTERVAL = 60000;     // 1 menit
-const unsigned long MAX_OFFLINE_AGE = 2592000; // 1 bulan
+const unsigned long SYNC_INTERVAL = 60000;
+const unsigned long MAX_OFFLINE_AGE = 2592000;
 const unsigned long MIN_REPEAT_INTERVAL = 1800;
-const unsigned long TIME_SYNC_INTERVAL = 3600000; // 1 jam
-const unsigned long RECONNECT_INTERVAL = 300000;  // 5 menit
+const unsigned long TIME_SYNC_INTERVAL = 3600000;
+const unsigned long RECONNECT_INTERVAL = 300000;
 const int SLEEP_START_HOUR = 23;
 const int SLEEP_END_HOUR = 5;
 const long GMT_OFFSET_SEC = 25200;
 
-// OPTIMASI CONFIG
-const unsigned long COUNT_CACHE_DURATION = 30000; // 30 detik
+// OPTIMIZATION CONFIG
 const int MAX_SYNC_FILES_PER_CYCLE = 5;
-const unsigned long MAX_SYNC_TIME = 15000;          // 15 detik per cycle
-const unsigned long DISPLAY_UPDATE_INTERVAL = 500;  // 500ms
-const unsigned long PERIODIC_CHECK_INTERVAL = 1000; // 1 detik
-const int MAX_DUPLICATE_CHECK_LINES = 100;          // Batasi pembacaan file
+const unsigned long MAX_SYNC_TIME = 15000;
+const unsigned long DISPLAY_UPDATE_INTERVAL = 500;
+const unsigned long PERIODIC_CHECK_INTERVAL = 1000;
+const int MAX_DUPLICATE_CHECK_LINES = 100;
 
 // RTC MEMORY
 RTC_DATA_ATTR time_t lastValidTime = 0;
@@ -100,11 +98,7 @@ bool isOnline = false;
 bool sdCardAvailable = false;
 String deviceId = "ESP32_";
 
-// OPTIMASI 1: Cached Record Counter
-int cachedRecordCount = -1;
-unsigned long lastCountUpdate = 0;
-
-// OPTIMASI 2: Display Buffer
+// DISPLAY BUFFER
 struct DisplayState
 {
   bool isOnline;
@@ -117,16 +111,12 @@ struct DisplayState
 DisplayState currentDisplay = {false, "00:00", 0, 0, true};
 DisplayState previousDisplay = {false, "00:00", 0, 0, false};
 
-// OPTIMASI 3: Chunked Sync State Machine
+// SYNC STATE MACHINE
 int syncCurrentFile = 0;
 bool syncInProgress = false;
 unsigned long syncStartTime = 0;
 
-// OPTIMASI 5: Async Cache Init
-bool cacheInitInProgress = false;
-int cacheInitFileIndex = 0;
-
-// NON-BLOCKING RECONNECT STATE MACHINE
+// RECONNECT STATE MACHINE
 enum ReconnectState
 {
   RECONNECT_IDLE,
@@ -142,25 +132,9 @@ unsigned long reconnectStartTime = 0;
 const int MAX_RECONNECT_RETRY = 20;
 const int RECONNECT_RETRY_DELAY = 300;
 
-// DUPLICATE CHECK CACHE
-struct DuplicateCache
-{
-  char rfid[11];
-  unsigned long unixTime;
-};
-
-const int CACHE_SIZE = 20;
-DuplicateCache duplicateCache[CACHE_SIZE];
-int cacheIndex = 0;
-bool cacheInitialized = false;
-
 // RACE CONDITION PROTECTION
 volatile bool isWritingToQueue = false;
 volatile bool isReadingQueue = false;
-
-// BACKGROUND PROCESS FLAGS
-bool isSyncing = false;
-bool isReconnecting = false;
 
 struct OfflineRecord
 {
@@ -184,12 +158,6 @@ void updateCurrentDisplayState();
 void updateStandbySignal();
 
 // ========================================
-// OPTIMASI 1: Cached Record Counter
-// ========================================
-int getCachedRecordCount();
-void invalidateRecordCountCache();
-
-// ========================================
 // SD CARD HELPERS
 // ========================================
 inline void selectSD()
@@ -210,10 +178,18 @@ String getQueueFileName(int index)
   return String(filename);
 }
 
-int _countRecordsInternal(const String &filename)
+int countRecordsInFile(const String &filename)
 {
-  if (!file.open(filename.c_str(), O_RDONLY))
+  if (!sdCardAvailable)
     return 0;
+
+  selectSD();
+
+  if (!file.open(filename.c_str(), O_RDONLY))
+  {
+    deselectSD();
+    return 0;
+  }
 
   int count = 0;
   char line[128];
@@ -228,15 +204,6 @@ int _countRecordsInternal(const String &filename)
   }
 
   file.close();
-  return count;
-}
-
-int countRecordsInFile(const String &filename)
-{
-  if (!sdCardAvailable)
-    return 0;
-  selectSD();
-  int count = _countRecordsInternal(filename);
   deselectSD();
   return count;
 }
@@ -254,28 +221,24 @@ int countAllOfflineRecords()
     String filename = getQueueFileName(i);
     if (sd.exists(filename.c_str()))
     {
-      total += _countRecordsInternal(filename);
+      if (file.open(filename.c_str(), O_RDONLY))
+      {
+        char line[128];
+        if (file.available())
+          file.fgets(line, sizeof(line));
+
+        while (file.fgets(line, sizeof(line)) > 0)
+        {
+          if (strlen(line) > 10)
+            total++;
+        }
+        file.close();
+      }
     }
   }
 
   deselectSD();
   return total;
-}
-
-// OPTIMASI 1: Implementasi Cached Counter
-int getCachedRecordCount()
-{
-  if (cachedRecordCount < 0 || millis() - lastCountUpdate > COUNT_CACHE_DURATION)
-  {
-    cachedRecordCount = countAllOfflineRecords();
-    lastCountUpdate = millis();
-  }
-  return cachedRecordCount;
-}
-
-void invalidateRecordCountCache()
-{
-  cachedRecordCount = -1;
 }
 
 // ========================================
@@ -315,7 +278,21 @@ bool initSDCard()
     }
     else
     {
-      int count = _countRecordsInternal(filename);
+      int count = 0;
+      if (file.open(filename.c_str(), O_RDONLY))
+      {
+        char line[128];
+        if (file.available())
+          file.fgets(line, sizeof(line));
+
+        while (file.fgets(line, sizeof(line)) > 0)
+        {
+          if (strlen(line) > 10)
+            count++;
+        }
+        file.close();
+      }
+
       if (count < MAX_RECORDS_PER_FILE)
       {
         currentQueueFile = i;
@@ -332,124 +309,10 @@ bool initSDCard()
 }
 
 // ========================================
-// DUPLICATE CHECK
+// DUPLICATE CHECK (Simplified)
 // ========================================
-bool isDuplicateInCache(const char *rfid, unsigned long currentUnixTime)
+bool isDuplicate(const char *rfid, unsigned long currentUnixTime)
 {
-  for (int i = 0; i < CACHE_SIZE; i++)
-  {
-    if (duplicateCache[i].rfid[0] != '\0' && strcmp(duplicateCache[i].rfid, rfid) == 0)
-    {
-      if (currentUnixTime - duplicateCache[i].unixTime < MIN_REPEAT_INTERVAL)
-      {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-void addToCache(const char *rfid, unsigned long unixTime)
-{
-  strncpy(duplicateCache[cacheIndex].rfid, rfid, 10);
-  duplicateCache[cacheIndex].rfid[10] = '\0';
-  duplicateCache[cacheIndex].unixTime = unixTime;
-  cacheIndex = (cacheIndex + 1) % CACHE_SIZE;
-}
-
-// OPTIMASI 5: Async Cache Initialization
-void asyncInitializeCache()
-{
-  if (!sdCardAvailable || cacheInitialized)
-    return;
-
-  if (!cacheInitInProgress)
-  {
-    cacheInitInProgress = true;
-    cacheInitFileIndex = 0;
-    for (int i = 0; i < CACHE_SIZE; i++)
-    {
-      duplicateCache[i].rfid[0] = '\0';
-      duplicateCache[i].unixTime = 0;
-    }
-    cacheIndex = 0;
-  }
-
-  if (cacheInitFileIndex < 2)
-  {
-    selectSD();
-
-    int fileNum = (cacheInitFileIndex == 0) ? currentQueueFile : (currentQueueFile == 0 ? MAX_QUEUE_FILES - 1 : currentQueueFile - 1);
-
-    String filename = getQueueFileName(fileNum);
-
-    if (sd.exists(filename.c_str()) && file.open(filename.c_str(), O_RDONLY))
-    {
-      char line[128];
-      if (file.available())
-        file.fgets(line, sizeof(line));
-
-      struct TempRecord
-      {
-        char rfid[11];
-        unsigned long unixTime;
-      };
-      TempRecord tempRecords[MAX_RECORDS_PER_FILE];
-      int tempCount = 0;
-
-      while (file.fgets(line, sizeof(line)) > 0 && tempCount < MAX_RECORDS_PER_FILE)
-      {
-        String lineStr = String(line);
-        lineStr.trim();
-        if (lineStr.length() < 10)
-          continue;
-
-        int firstComma = lineStr.indexOf(',');
-        int thirdComma = lineStr.lastIndexOf(',');
-
-        if (firstComma > 0 && thirdComma > 0)
-        {
-          String fileRfid = lineStr.substring(0, firstComma);
-          unsigned long fileUnixTime = lineStr.substring(thirdComma + 1).toInt();
-
-          fileRfid.toCharArray(tempRecords[tempCount].rfid, 11);
-          tempRecords[tempCount].unixTime = fileUnixTime;
-          tempCount++;
-        }
-      }
-      file.close();
-
-      int cachePopulated = cacheIndex;
-      for (int i = tempCount - 1; i >= 0 && cachePopulated < CACHE_SIZE; i--)
-      {
-        strncpy(duplicateCache[cachePopulated].rfid, tempRecords[i].rfid, 10);
-        duplicateCache[cachePopulated].rfid[10] = '\0';
-        duplicateCache[cachePopulated].unixTime = tempRecords[i].unixTime;
-        cachePopulated++;
-      }
-      cacheIndex = cachePopulated;
-    }
-
-    deselectSD();
-    cacheInitFileIndex++;
-  }
-  else
-  {
-    cacheInitialized = true;
-    cacheInitInProgress = false;
-  }
-}
-
-// OPTIMASI 4: Limited Duplicate Check (hanya 2 file terakhir)
-bool isDuplicateLimited(const char *rfid, unsigned long currentUnixTime)
-{
-  // 1. Cek cache dulu (super cepat)
-  if (isDuplicateInCache(rfid, currentUnixTime))
-  {
-    return true;
-  }
-
-  // 2. Hanya cek 2 file terakhir
   if (!sdCardAvailable)
     return false;
 
@@ -462,6 +325,7 @@ bool isDuplicateLimited(const char *rfid, unsigned long currentUnixTime)
   selectSD();
   bool found = false;
 
+  // Check last 2 files only
   for (int offset = 0; offset <= 1; offset++)
   {
     int fileIdx = (currentQueueFile - offset + MAX_QUEUE_FILES) % MAX_QUEUE_FILES;
@@ -527,7 +391,7 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
   }
   isWritingToQueue = true;
 
-  if (isDuplicateLimited(rfid, unixTime))
+  if (isDuplicate(rfid, unixTime))
   {
     isWritingToQueue = false;
     return false;
@@ -551,7 +415,21 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
     }
   }
 
-  int currentCount = _countRecordsInternal(currentFile);
+  // Count records in current file
+  int currentCount = 0;
+  if (file.open(currentFile.c_str(), O_RDONLY))
+  {
+    char line[128];
+    if (file.available())
+      file.fgets(line, sizeof(line));
+
+    while (file.fgets(line, sizeof(line)) > 0)
+    {
+      if (strlen(line) > 10)
+        currentCount++;
+    }
+    file.close();
+  }
 
   if (currentCount >= MAX_RECORDS_PER_FILE)
   {
@@ -571,11 +449,6 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
     }
     file.println("rfid,timestamp,device_id,unix_time");
     file.close();
-
-    deselectSD();
-    cacheInitialized = false;
-    asyncInitializeCache();
-    selectSD();
   }
 
   if (!file.open(currentFile.c_str(), O_WRONLY | O_APPEND))
@@ -597,9 +470,6 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
   file.close();
 
   deselectSD();
-
-  addToCache(rfid, unixTime);
-
   isWritingToQueue = false;
   return true;
 }
@@ -659,7 +529,6 @@ bool readQueueFile(const String &filename, OfflineRecord *records, int *count, i
   return *count > 0;
 }
 
-// OPTIMASI 6: Shorter HTTP Timeout
 bool syncQueueFile(const String &filename)
 {
   if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
@@ -677,8 +546,8 @@ bool syncQueueFile(const String &filename)
   }
 
   HTTPClient http;
-  http.setTimeout(30000);        // 30 detik
-  http.setConnectTimeout(10000); // 10 detik untuk connect
+  http.setTimeout(30000);
+  http.setConnectTimeout(10000);
 
   char url[80];
   strcpy_P(url, API_BASE_URL);
@@ -718,7 +587,6 @@ bool syncQueueFile(const String &filename)
   return false;
 }
 
-// OPTIMASI 3: Chunked Sync dengan State Machine
 void chunkedSync()
 {
   if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
@@ -736,7 +604,9 @@ void chunkedSync()
 
   int filesSynced = 0;
 
-  while (syncCurrentFile < MAX_QUEUE_FILES && filesSynced < MAX_SYNC_FILES_PER_CYCLE && millis() - syncStartTime < MAX_SYNC_TIME)
+  while (syncCurrentFile < MAX_QUEUE_FILES &&
+         filesSynced < MAX_SYNC_FILES_PER_CYCLE &&
+         millis() - syncStartTime < MAX_SYNC_TIME)
   {
 
     String filename = getQueueFileName(syncCurrentFile);
@@ -753,7 +623,6 @@ void chunkedSync()
         if (syncQueueFile(filename))
         {
           filesSynced++;
-          invalidateRecordCountCache();
         }
       }
     }
@@ -761,7 +630,6 @@ void chunkedSync()
     syncCurrentFile++;
   }
 
-  // Selesai sync semua file
   if (syncCurrentFile >= MAX_QUEUE_FILES)
   {
     syncInProgress = false;
@@ -985,7 +853,7 @@ void processReconnect()
     {
       if (sdCardAvailable && !syncInProgress)
       {
-        int pending = getCachedRecordCount();
+        int pending = countAllOfflineRecords();
         if (pending > 0)
         {
           chunkedSync();
@@ -1010,7 +878,8 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
 {
   if (length >= 4)
   {
-    uint32_t value = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) | ((uint32_t)uid[1] << 8) | uid[0];
+    uint32_t value = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) |
+                     ((uint32_t)uid[1] << 8) | uid[0];
     sprintf(output, "%010lu", value);
   }
   else
@@ -1019,7 +888,6 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
   }
 }
 
-// OPTIMASI 9: Kirim Presensi dengan Limited Check
 bool kirimPresensi(const char *rfidUID, char *message)
 {
   String timestamp = getFormattedTimestamp();
@@ -1027,8 +895,7 @@ bool kirimPresensi(const char *rfidUID, char *message)
 
   if (sdCardAvailable)
   {
-    // Gunakan isDuplicateLimited (hanya cek 2 file terakhir)
-    if (isDuplicateLimited(rfidUID, currentUnixTime))
+    if (isDuplicate(rfidUID, currentUnixTime))
     {
       strcpy(message, "CUKUP SEKALI!");
       return false;
@@ -1037,7 +904,6 @@ bool kirimPresensi(const char *rfidUID, char *message)
     if (saveToQueue(rfidUID, timestamp.c_str(), currentUnixTime))
     {
       strcpy(message, "DATA TERSIMPAN");
-      invalidateRecordCountCache();
       return true;
     }
     else
@@ -1114,13 +980,13 @@ void showStartupAnimation()
   const char title[] PROGMEM = "ZEDLABS";
   const char subtitle1[] PROGMEM = "INNOVATE BEYOND";
   const char subtitle2[] PROGMEM = "LIMITS";
-  const char version[] PROGMEM = "v2.2.2 ULTIMATE";
+  const char version[] PROGMEM = "v2.3.0 CLEAN";
 
   const int titleLength = 7;
   const int titleX = (SCREEN_WIDTH - (titleLength * 12)) / 2;
   const int sub1X = (SCREEN_WIDTH - 15 * 6) / 2;
   const int sub2X = (SCREEN_WIDTH - 6 * 6) / 2;
-  const int verX = (SCREEN_WIDTH - 16 * 6) / 2;
+  const int verX = (SCREEN_WIDTH - 14 * 6) / 2;
 
   for (int x = -80; x <= titleX; x += 4)
   {
@@ -1153,7 +1019,6 @@ void showStartupAnimation()
   delay(500);
 }
 
-// OPTIMASI 10: Update Display State
 void updateCurrentDisplayState()
 {
   currentDisplay.isOnline = (WiFi.status() == WL_CONNECTED);
@@ -1167,7 +1032,7 @@ void updateCurrentDisplayState()
 
   if (sdCardAvailable)
   {
-    currentDisplay.pendingRecords = getCachedRecordCount();
+    currentDisplay.pendingRecords = countAllOfflineRecords();
   }
   else
   {
@@ -1188,10 +1053,8 @@ void updateCurrentDisplayState()
   }
 }
 
-// OPTIMASI 2: Display Buffer untuk Reduce Redraw
 void updateStandbySignal()
 {
-  // Hanya update jika ada perubahan
   if (memcmp(&currentDisplay, &previousDisplay, sizeof(DisplayState)) != 0)
   {
     display.clearDisplay();
@@ -1302,7 +1165,6 @@ void fatalError(const __FlashStringHelper *errorMessage)
   ESP.restart();
 }
 
-// OPTIMASI 8: Fast RFID Handler
 void handleRFIDScan()
 {
   deselectSD();
@@ -1338,8 +1200,6 @@ void handleRFIDScan()
   rfidReader.PICC_HaltA();
   rfidReader.PCD_StopCrypto1();
   digitalWrite(PIN_RFID_SS, HIGH);
-
-  invalidateRecordCountCache();
 }
 
 // ========================================
@@ -1370,10 +1230,7 @@ void setup()
     playToneSuccess();
     delay(800);
 
-    showProgress(F("LOAD CACHE"), 1000);
-    asyncInitializeCache(); // Mulai async initialization
-
-    int pending = getCachedRecordCount();
+    int pending = countAllOfflineRecords();
     if (pending > 0)
     {
       snprintf(messageBuffer, sizeof(messageBuffer), "%d TERSISA", pending);
@@ -1415,13 +1272,13 @@ void setup()
 
       if (sdCardAvailable)
       {
-        int pending = getCachedRecordCount();
+        int pending = countAllOfflineRecords();
         if (pending > 0)
         {
           snprintf(messageBuffer, sizeof(messageBuffer), "%d records", pending);
           showOLED(F("SYNC DATA"), messageBuffer);
           delay(1000);
-          chunkedSync(); // Gunakan chunked sync
+          chunkedSync();
         }
       }
     }
@@ -1454,17 +1311,17 @@ void setup()
 }
 
 // ========================================
-// OPTIMASI 7: LOOP dengan Task Scheduling
+// MAIN LOOP
 // ========================================
 void loop()
 {
   unsigned long currentMillis = millis();
 
-  // Task 1: RFID Reading (Highest Priority - Always Check)
+  // Task 1: RFID Reading (Highest Priority)
   if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial())
   {
     handleRFIDScan();
-    return; // Skip tugas lain saat ada scan
+    return;
   }
 
   // Task 2: Display Update (Medium Priority - 500ms interval)
@@ -1472,19 +1329,13 @@ void loop()
   {
     lastDisplayUpdate = currentMillis;
     updateCurrentDisplayState();
-    updateStandbySignal(); // Hanya update jika ada perubahan
+    updateStandbySignal();
   }
 
   // Task 3: Periodic Background Tasks (Low Priority - 1s interval)
   if (currentMillis - lastPeriodicCheck >= PERIODIC_CHECK_INTERVAL)
   {
     lastPeriodicCheck = currentMillis;
-
-    // Async cache init jika belum selesai
-    if (!cacheInitialized)
-    {
-      asyncInitializeCache();
-    }
 
     // Chunked sync
     if (syncInProgress || (currentMillis - lastSyncTime >= SYNC_INTERVAL))
@@ -1521,11 +1372,13 @@ void loop()
 
       if (currentHour >= SLEEP_START_HOUR)
       {
-        sleepSeconds = ((24 - currentHour) * 3600) + (targetHour * 3600) - (currentMinute * 60 + currentSecond);
+        sleepSeconds = ((24 - currentHour) * 3600) + (targetHour * 3600) -
+                       (currentMinute * 60 + currentSecond);
       }
       else
       {
-        sleepSeconds = ((targetHour - currentHour) * 3600) - (currentMinute * 60 + currentSecond);
+        sleepSeconds = ((targetHour - currentHour) * 3600) -
+                       (currentMinute * 60 + currentSecond);
       }
 
       if (sleepSeconds < 60)
@@ -1539,8 +1392,8 @@ void loop()
       delay(30000);
 
       display.clearDisplay();
-      display.display();                           // Kirim buffer kosong
-      display.ssd1306_command(SSD1306_DISPLAYOFF); // Matikan display
+      display.display();
+      display.ssd1306_command(SSD1306_DISPLAYOFF);
 
       esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
       esp_deep_sleep_start();
