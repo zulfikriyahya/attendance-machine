@@ -677,8 +677,8 @@ bool syncQueueFile(const String &filename)
   }
 
   HTTPClient http;
-  http.setTimeout(30000);        // 10 detik (lebih pendek dari 30)
-  http.setConnectTimeout(10000); // 3 detik untuk connect
+  http.setTimeout(30000);        // 30 detik
+  http.setConnectTimeout(10000); // 10 detik untuk connect
 
   char url[80];
   strcpy_P(url, API_BASE_URL);
