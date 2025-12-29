@@ -58,7 +58,7 @@ const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
 // QUEUE SYSTEM CONFIG
 const int MAX_RECORDS_PER_FILE = 50;
 const int MAX_QUEUE_FILES = 1000;
-const unsigned long SYNC_INTERVAL = 300000;    // 5 menit
+const unsigned long SYNC_INTERVAL = 60000;     // 1 menit
 const unsigned long MAX_OFFLINE_AGE = 2592000; // 1 bulan
 const unsigned long MIN_REPEAT_INTERVAL = 1800;
 const unsigned long TIME_SYNC_INTERVAL = 3600000; // 1 jam
