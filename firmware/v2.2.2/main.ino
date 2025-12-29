@@ -265,8 +265,7 @@ int countAllOfflineRecords()
 // OPTIMASI 1: Implementasi Cached Counter
 int getCachedRecordCount()
 {
-  if (cachedRecordCount < 0 ||
-      millis() - lastCountUpdate > COUNT_CACHE_DURATION)
+  if (cachedRecordCount < 0 || millis() - lastCountUpdate > COUNT_CACHE_DURATION)
   {
     cachedRecordCount = countAllOfflineRecords();
     lastCountUpdate = millis();
@@ -339,8 +338,7 @@ bool isDuplicateInCache(const char *rfid, unsigned long currentUnixTime)
 {
   for (int i = 0; i < CACHE_SIZE; i++)
   {
-    if (duplicateCache[i].rfid[0] != '\0' &&
-        strcmp(duplicateCache[i].rfid, rfid) == 0)
+    if (duplicateCache[i].rfid[0] != '\0' && strcmp(duplicateCache[i].rfid, rfid) == 0)
     {
       if (currentUnixTime - duplicateCache[i].unixTime < MIN_REPEAT_INTERVAL)
       {
@@ -738,9 +736,7 @@ void chunkedSync()
 
   int filesSynced = 0;
 
-  while (syncCurrentFile < MAX_QUEUE_FILES &&
-         filesSynced < MAX_SYNC_FILES_PER_CYCLE &&
-         millis() - syncStartTime < MAX_SYNC_TIME)
+  while (syncCurrentFile < MAX_QUEUE_FILES && filesSynced < MAX_SYNC_FILES_PER_CYCLE && millis() - syncStartTime < MAX_SYNC_TIME)
   {
 
     String filename = getQueueFileName(syncCurrentFile);
@@ -920,8 +916,7 @@ void processReconnect()
   switch (reconnectState)
   {
   case RECONNECT_IDLE:
-    if (WiFi.status() != WL_CONNECTED &&
-        millis() - lastReconnectAttempt >= RECONNECT_INTERVAL)
+    if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt >= RECONNECT_INTERVAL)
     {
       lastReconnectAttempt = millis();
       reconnectState = RECONNECT_TRYING_SSID1;
@@ -1015,8 +1010,7 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
 {
   if (length >= 4)
   {
-    uint32_t value = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) |
-                     ((uint32_t)uid[1] << 8) | uid[0];
+    uint32_t value = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) | ((uint32_t)uid[1] << 8) | uid[0];
     sprintf(output, "%010lu", value);
   }
   else
@@ -1205,8 +1199,7 @@ void updateStandbySignal()
     display.setTextColor(WHITE);
 
     display.setCursor(2, 2);
-    if (reconnectState == RECONNECT_TRYING_SSID1 ||
-        reconnectState == RECONNECT_TRYING_SSID2)
+    if (reconnectState == RECONNECT_TRYING_SSID1 || reconnectState == RECONNECT_TRYING_SSID2)
     {
       display.print(F("RECONN"));
       for (int i = 0; i < (millis() / 500) % 4; i++)
@@ -1319,8 +1312,7 @@ void handleRFIDScan()
   uidToString(rfidReader.uid.uidByte, rfidReader.uid.size, rfidBuffer);
 
   // Debounce check
-  if (strcmp(rfidBuffer, lastUID) == 0 &&
-      millis() - lastScanTime < DEBOUNCE_TIME)
+  if (strcmp(rfidBuffer, lastUID) == 0 && millis() - lastScanTime < DEBOUNCE_TIME)
   {
     rfidReader.PICC_HaltA();
     rfidReader.PCD_StopCrypto1();
@@ -1529,14 +1521,11 @@ void loop()
 
       if (currentHour >= SLEEP_START_HOUR)
       {
-        sleepSeconds = ((24 - currentHour) * 3600) +
-                       (targetHour * 3600) -
-                       (currentMinute * 60 + currentSecond);
+        sleepSeconds = ((24 - currentHour) * 3600) + (targetHour * 3600) - (currentMinute * 60 + currentSecond);
       }
       else
       {
-        sleepSeconds = ((targetHour - currentHour) * 3600) -
-                       (currentMinute * 60 + currentSecond);
+        sleepSeconds = ((targetHour - currentHour) * 3600) - (currentMinute * 60 + currentSecond);
       }
 
       if (sleepSeconds < 60)
@@ -1544,10 +1533,14 @@ void loop()
       if (sleepSeconds > 43200)
         sleepSeconds = 43200;
 
-      snprintf(messageBuffer, sizeof(messageBuffer), "%dh %dm",
+      snprintf(messageBuffer, sizeof(messageBuffer), "%dJam %Menit",
                sleepSeconds / 3600, (sleepSeconds % 3600) / 60);
       showOLED(F("SLEEP FOR"), messageBuffer);
-      delay(2000);
+      delay(60000);
+
+      display.clearDisplay();
+      display.display();                           // Kirim buffer kosong
+      display.ssd1306_command(SSD1306_DISPLAYOFF); // Matikan display
 
       esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
       esp_deep_sleep_start();
