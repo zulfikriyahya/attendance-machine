@@ -1533,10 +1533,10 @@ void loop()
       if (sleepSeconds > 43200)
         sleepSeconds = 43200;
 
-      snprintf(messageBuffer, sizeof(messageBuffer), "%dJam %dMenit",
+      snprintf(messageBuffer, sizeof(messageBuffer), "%d Jam %d Menit",
                sleepSeconds / 3600, (sleepSeconds % 3600) / 60);
       showOLED(F("SLEEP FOR"), messageBuffer);
-      delay(60000);
+      delay(30000);
 
       display.clearDisplay();
       display.display();                           // Kirim buffer kosong
