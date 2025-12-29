@@ -49,7 +49,7 @@
 const char WIFI_SSID_1[] PROGMEM = "SSID_WIFI_1";
 const char WIFI_SSID_2[] PROGMEM = "SSID_WIFI_2";
 const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
-const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi1";
+const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi2";
 const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
 const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
 const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
