@@ -15,7 +15,7 @@
  * - Fatal error handler untuk debugging
  * - Memory efficient dengan buffered I/O
  * - Faster operations & better user experience
- * - Auto-reconnect WiFi setiap 300 detik
+ * - Auto-reconnect WiFi
  * - Auto-restart jika ping API gagal
  * ======================================================================================
  */
@@ -46,12 +46,12 @@
 #define DEBOUNCE_TIME 150
 
 // NETWORK CONFIG
-const char WIFI_SSID_1[] PROGMEM = "SSID_WIFI_1";
-const char WIFI_SSID_2[] PROGMEM = "SSID_WIFI_2";
-const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
-const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi1";
-const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
+const char WIFI_SSID_1[] PROGMEM = "PRESENSI";
+const char WIFI_SSID_2[] PROGMEM = "PRESENSI";
+const char WIFI_PASSWORD_1[] PROGMEM = "P@ssw0rd";
+const char WIFI_PASSWORD_2[] PROGMEM = "P@ssw0rd";
+const char API_BASE_URL[] PROGMEM = "https://presensi.mtsn1pandeglang.sch.id";
+const char API_SECRET_KEY[] PROGMEM = "P@ndegl@ng_14012000*";
 const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
 const char NTP_SERVER_2[] PROGMEM = "time.google.com";
 const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
@@ -303,7 +303,22 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 
   selectSD();
 
+  if (currentQueueFile < 0 || currentQueueFile >= MAX_QUEUE_FILES)
+  {
+    currentQueueFile = 0;
+  }
+
   String currentFile = getQueueFileName(currentQueueFile);
+
+  if (!sd.exists(currentFile.c_str()))
+  {
+    if (file.open(currentFile.c_str(), O_WRONLY | O_CREAT))
+    {
+      file.println("rfid,timestamp,device_id,unix_time");
+      file.close();
+    }
+  }
+
   int currentCount = _countRecordsInternal(currentFile);
 
   if (currentCount >= MAX_RECORDS_PER_FILE)
@@ -338,6 +353,8 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
   file.print(deviceId);
   file.print(",");
   file.println(unixTime);
+
+  file.sync();
   file.close();
 
   deselectSD();
@@ -691,6 +708,9 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
   }
 }
 
+// ========================================
+// KIRIM PRESENSI
+// ========================================
 bool kirimPresensi(const char *rfidUID, char *message)
 {
   String timestamp = getFormattedTimestamp();
@@ -698,6 +718,12 @@ bool kirimPresensi(const char *rfidUID, char *message)
 
   if (sdCardAvailable)
   {
+    if (isDuplicateInAllQueues(rfidUID, currentUnixTime))
+    {
+      strcpy(message, "CUKUP SEKALI!");
+      return false;
+    }
+
     if (saveToQueue(rfidUID, timestamp.c_str(), currentUnixTime))
     {
       strcpy(message, "DATA TERSIMPAN");
@@ -705,7 +731,7 @@ bool kirimPresensi(const char *rfidUID, char *message)
     }
     else
     {
-      strcpy(message, isDuplicateInAllQueues(rfidUID, currentUnixTime) ? "CUKUP SEKALI!" : "QUEUE PENUH!");
+      strcpy(message, "SD CARD ERROR");
       return false;
     }
   }

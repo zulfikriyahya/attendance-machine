@@ -15,7 +15,7 @@
  * - Fatal error handler untuk debugging
  * - Memory efficient dengan buffered I/O
  * - Faster operations & better user experience
- * - Auto-reconnect WiFi setiap 300 detik
+ * - Auto-reconnect WiFi
  * - Auto-restart jika ping API gagal
  * - Background reconnect & sync tanpa mengganggu tapping
  * ======================================================================================
@@ -47,12 +47,12 @@
 #define DEBOUNCE_TIME 150
 
 // NETWORK CONFIG
-const char WIFI_SSID_1[] PROGMEM = "SSID_WIFI_1";
-const char WIFI_SSID_2[] PROGMEM = "SSID_WIFI_2";
-const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
-const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi1";
-const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
+const char WIFI_SSID_1[] PROGMEM = "PRESENSI";
+const char WIFI_SSID_2[] PROGMEM = "PRESENSI";
+const char WIFI_PASSWORD_1[] PROGMEM = "P@ssw0rd";
+const char WIFI_PASSWORD_2[] PROGMEM = "P@ssw0rd";
+const char API_BASE_URL[] PROGMEM = "https://presensi.mtsn1pandeglang.sch.id";
+const char API_SECRET_KEY[] PROGMEM = "P@ndegl@ng_14012000*";
 const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
 const char NTP_SERVER_2[] PROGMEM = "time.google.com";
 const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
@@ -308,7 +308,22 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 
   selectSD();
 
+  if (currentQueueFile < 0 || currentQueueFile >= MAX_QUEUE_FILES)
+  {
+    currentQueueFile = 0;
+  }
+
   String currentFile = getQueueFileName(currentQueueFile);
+
+  if (!sd.exists(currentFile.c_str()))
+  {
+    if (file.open(currentFile.c_str(), O_WRONLY | O_CREAT))
+    {
+      file.println("rfid,timestamp,device_id,unix_time");
+      file.close();
+    }
+  }
+
   int currentCount = _countRecordsInternal(currentFile);
 
   if (currentCount >= MAX_RECORDS_PER_FILE)
@@ -343,6 +358,8 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
   file.print(deviceId);
   file.print(",");
   file.println(unixTime);
+
+  file.sync();
   file.close();
 
   deselectSD();
@@ -466,7 +483,6 @@ bool syncAllQueues()
   if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
     return false;
 
-  // Set flag untuk proses background
   isSyncing = true;
 
   int totalSynced = 0;
@@ -491,7 +507,6 @@ bool syncAllQueues()
       continue;
     }
 
-    // Background sync tanpa tampilan
     if (syncQueueFile(filename))
     {
       totalSynced += fileRecords;
@@ -500,7 +515,6 @@ bool syncAllQueues()
 
   if (totalSynced > 0)
   {
-    // Reset currentQueueFile ke file pertama yang kosong atau buat baru
     currentQueueFile = 0;
     String firstFile = getQueueFileName(0);
     selectSD();
@@ -515,7 +529,6 @@ bool syncAllQueues()
     deselectSD();
   }
 
-  // Clear flag setelah selesai
   isSyncing = false;
 
   return totalSynced > 0;
@@ -526,7 +539,7 @@ void periodicSync()
   if (!sdCardAvailable)
     return;
   if (isSyncing)
-    return; // Skip jika sedang syncing
+    return;
   if (millis() - lastSyncTime < SYNC_INTERVAL)
     return;
 
@@ -668,7 +681,6 @@ bool connectToWiFiBackground()
 
     WiFi.begin(ssid, password);
 
-    // Tunggu maksimal 6 detik (20x300ms)
     for (int retry = 0; retry < 20 && WiFi.status() != WL_CONNECTED; retry++)
     {
       delay(300);
@@ -724,6 +736,9 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
   }
 }
 
+// ========================================
+// KIRIM PRESENSI
+// ========================================
 bool kirimPresensi(const char *rfidUID, char *message)
 {
   String timestamp = getFormattedTimestamp();
@@ -731,6 +746,12 @@ bool kirimPresensi(const char *rfidUID, char *message)
 
   if (sdCardAvailable)
   {
+    if (isDuplicateInAllQueues(rfidUID, currentUnixTime))
+    {
+      strcpy(message, "CUKUP SEKALI!");
+      return false;
+    }
+
     if (saveToQueue(rfidUID, timestamp.c_str(), currentUnixTime))
     {
       strcpy(message, "DATA TERSIMPAN");
@@ -738,16 +759,7 @@ bool kirimPresensi(const char *rfidUID, char *message)
     }
     else
     {
-      // saveToQueue return false bisa karena duplicate atau error SD
-      // Cek apakah karena duplicate
-      if (isDuplicateInAllQueues(rfidUID, currentUnixTime))
-      {
-        strcpy(message, "CUKUP SEKALI!");
-      }
-      else
-      {
-        strcpy(message, "GAGAL SIMPAN!");
-      }
+      strcpy(message, "SD CARD ERROR");
       return false;
     }
   }
@@ -825,7 +837,7 @@ void showStartupAnimation()
   const int titleX = (SCREEN_WIDTH - (titleLength * 12)) / 2;
   const int sub1X = (SCREEN_WIDTH - 15 * 6) / 2;
   const int sub2X = (SCREEN_WIDTH - 6 * 6) / 2;
-  const int verX = (SCREEN_WIDTH - 15 * 6) / 2;
+  const int verX = (SCREEN_WIDTH - 12 * 6) / 2;
 
   for (int x = -80; x <= titleX; x += 4)
   {
@@ -864,11 +876,9 @@ void showStandbySignal()
   display.setTextSize(1);
   display.setTextColor(WHITE);
 
-  // Status ONLINE/OFFLINE di kiri atas
   display.setCursor(2, 2);
   display.print(isOnline ? F("ONLINE") : F("OFFLINE"));
 
-  // TAP KARTU di tengah (center sempurna)
   const char *tapText = "TAP KARTU";
   int16_t x1, y1;
   uint16_t w1, h1;
@@ -876,7 +886,6 @@ void showStandbySignal()
   display.setCursor((SCREEN_WIDTH - w1) / 2, 20);
   display.print(tapText);
 
-  // Waktu di tengah bawah TAP KARTU
   struct tm timeInfo;
   if (getTimeWithFallback(&timeInfo))
   {
@@ -886,7 +895,6 @@ void showStandbySignal()
     display.print(messageBuffer);
   }
 
-  // Queue counter di bawah tengah (jika ada pending)
   if (sdCardAvailable)
   {
     int pending = countAllOfflineRecords();
@@ -899,7 +907,6 @@ void showStandbySignal()
     }
   }
 
-  // Signal WiFi di kanan atas
   if (WiFi.status() == WL_CONNECTED)
   {
     long rssi = WiFi.RSSI();
@@ -1058,7 +1065,6 @@ void setup()
     }
     else
     {
-      // Jika API gagal setelah 3 retry, restart sistem
       fatalError(F("API GAGAL"));
     }
   }
@@ -1107,7 +1113,6 @@ void loop()
     }
   }
 
-  // Auto-reconnect WiFi di background
   if (WiFi.status() != WL_CONNECTED && isOnline)
   {
     isOnline = false;
@@ -1117,22 +1122,17 @@ void loop()
     isOnline = pingAPI();
   }
 
-  // Coba reconnect setiap 5 menit jika WiFi putus (background process)
   if (WiFi.status() != WL_CONNECTED &&
       !isReconnecting &&
       millis() - lastReconnectAttempt >= RECONNECT_INTERVAL)
   {
-
     lastReconnectAttempt = millis();
     isReconnecting = true;
 
-    // Background reconnect tanpa tampilan
     if (connectToWiFiBackground())
     {
       if (pingAPI())
       {
-        // WiFi restored di background
-        // Sync data offline jika ada
         if (sdCardAvailable && !isSyncing)
         {
           int pending = countAllOfflineRecords();

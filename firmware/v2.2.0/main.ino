@@ -700,7 +700,7 @@ bool kirimPresensi(const char *rfidUID, char *message)
     }
     else
     {
-      strcpy(message, isDuplicateInAllQueues(rfidUID, currentUnixTime) ? "DUPLIKAT! < 30 MIN" : "QUEUE PENUH!");
+      strcpy(message, isDuplicateInAllQueues(rfidUID, currentUnixTime) ? "CUKUP SEKALI !" : "QUEUE PENUH!");
       return false;
     }
   }
