@@ -38,12 +38,12 @@
 #define DEBOUNCE_TIME 150
 
 // NETWORK CONFIG
-const char WIFI_SSID_1[] PROGMEM = "PRESENSI";
-const char WIFI_SSID_2[] PROGMEM = "PRESENSI";
-const char WIFI_PASSWORD_1[] PROGMEM = "P@ssw0rd";
-const char WIFI_PASSWORD_2[] PROGMEM = "P@ssw0rd";
-const char API_BASE_URL[] PROGMEM = "https://presensi.mtsn1pandeglang.sch.id";
-const char API_SECRET_KEY[] PROGMEM = "P@ndegl@ng_14012000*";
+const char WIFI_SSID_1[] PROGMEM = "SSID_WIFI_1";
+const char WIFI_SSID_2[] PROGMEM = "SSID_WIFI_2";
+const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
+const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi2";
+const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
+const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
 const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
 const char NTP_SERVER_2[] PROGMEM = "time.google.com";
 const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
