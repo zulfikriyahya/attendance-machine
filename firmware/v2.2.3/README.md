@@ -1,7 +1,3 @@
-Berikut adalah **README.md** untuk versi **2.2.3** yang telah disesuaikan dengan perubahan pada *source code*, khususnya pada optimasi sinyal WiFi dan struktur antrean data.
-
----
-
 # Sistem Presensi RFID - Queue System v2.2.3 (Ultimate - Connectivity Edition)
 
 ## Deskripsi Proyek
