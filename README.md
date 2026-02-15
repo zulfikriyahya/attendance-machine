@@ -10,27 +10,23 @@ Sistem ini beroperasi dengan filosofi _Self-Healing_ dan _Store-and-Forward_, me
 
 Proyek ini bertujuan mendigitalisasi, mengautomatisasi, dan mengintegrasikan data kehadiran lembaga pendidikan dan instansi pemerintahan dengan sistem yang tangguh (_resilient_) dan **user-friendly**. Fokus utamanya adalah menghapus hambatan teknis akibat gangguan jaringan, menciptakan transparansi data, mempermudah pelaporan administratif melalui ekosistem digital terintegrasi, serta memberikan **pengalaman pengguna yang mulus tanpa gangguan proses teknis**.
 
+---
+
 ## Arsitektur Sistem
 
 Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap status konektivitas dengan prioritas pada responsivitas dan user experience.
 
 ### Mekanisme Operasional Utama
 
-1.  **Identifikasi:** Pengguna memindai kartu RFID pada perangkat.
-2.  **Validasi Lokal:** Perangkat melakukan verifikasi _debounce_ dan pengecekan duplikasi data dalam interval waktu tertentu (default: 30 menit) langsung pada penyimpanan lokal untuk mencegah input ganda.
-3.  **Manajemen Penyimpanan (Queue System):**
-    - Data tidak dikirim langsung satu per satu, melainkan masuk ke dalam sistem antrean berkas CSV (`queue_X.csv`).
-    - **Rotasi Berkas:** Data dipecah menjadi berkas-berkas kecil (maksimal 50 rekaman per berkas) untuk menjaga stabilitas memori RAM mikrokontroler.
-4.  **Sinkronisasi Latar Belakang (_Background Sync_):**
-    - Sistem secara berkala (setiap 5 menit) memeriksa keberadaan berkas antrean.
-    - Jika koneksi internet tersedia, data dikirim secara _batch_ (satu berkas sekaligus) ke server **tanpa menampilkan proses atau mengganggu pengguna**.
-    - Berkas lokal dihapus secara otomatis hanya jika server memberikan respons sukses (HTTP 200), menjamin konsistensi data.
-    - **Non-Blocking:** Proses sinkronisasi berjalan di background tanpa memblokir operasi tapping RFID.
-5.  **Reconnect Otomatis (_Silent Auto-Reconnect_):**
-    - Jika WiFi terputus, sistem akan mencoba reconnect setiap 5 menit secara otomatis.
-    - Proses reconnect berjalan **diam-diam di latar belakang** tanpa menampilkan loading atau progress bar.
-    - Setelah WiFi kembali online, sistem otomatis melakukan sync data offline yang tertunda.
-6.  **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
+1. **Identifikasi:** Pengguna memindai kartu RFID pada perangkat.
+2. **Validasi Lokal:** Perangkat melakukan verifikasi _debounce_ dan pengecekan duplikasi data dalam interval waktu tertentu (default: 30 menit) langsung pada penyimpanan lokal untuk mencegah input ganda.
+3. **Manajemen Penyimpanan (Queue System):** Data tidak dikirim langsung satu per satu, melainkan masuk ke dalam sistem antrean berkas CSV (`queue_X.csv`). Data dipecah menjadi berkas-berkas kecil (maksimal 25 rekaman per berkas) untuk menjaga stabilitas memori RAM mikrokontroler.
+4. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) memeriksa keberadaan berkas antrean. Jika koneksi internet tersedia, data dikirim secara _batch_ ke server **tanpa menampilkan proses atau mengganggu pengguna**. Berkas lokal dihapus secara otomatis hanya jika server memberikan respons sukses (HTTP 200).
+5. **Reconnect Otomatis (_Silent Auto-Reconnect_):** Jika WiFi terputus, sistem mencoba reconnect setiap 5 menit secara otomatis dan diam-diam di latar belakang. Setelah kembali online, sistem otomatis melakukan sync data offline yang tertunda.
+6. **Manajemen OLED Cerdas:** Layar OLED otomatis mati pada jam tertentu untuk hemat daya dan memperpanjang umur display, namun tetap menyala sementara saat ada tapping kartu.
+7. **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
+
+---
 
 ## Spesifikasi Teknis
 
@@ -47,81 +43,123 @@ Sistem ini menggunakan arsitektur bus SPI bersama (_Shared SPI Bus_) untuk efisi
 | **Indikator Audio**  | Buzzer Aktif 5V          | Umpan balik audio untuk status sukses, gagal, atau kesalahan sistem.       |
 | **Catu Daya**        | 5V USB / 3.7V Li-ion     | Sumber daya operasional.                                                   |
 
-### Fitur Perangkat Lunak (Firmware)
+### Pinout ESP32-C3
 
-#### Core Features
+| Komponen       | Pin Modul | Pin ESP32-C3 | Protokol | Catatan                        |
+| :------------- | :-------- | :----------- | :------- | :----------------------------- |
+| **Bus SPI**    | SCK       | GPIO 4       | SPI      | Jalur Clock (Shared)           |
+|                | MOSI      | GPIO 6       | SPI      | Jalur Data Master Out (Shared) |
+|                | MISO      | GPIO 5       | SPI      | Jalur Data Master In (Shared)  |
+| **RFID RC522** | SDA (SS)  | GPIO 7       | SPI      | Chip Select RFID               |
+|                | RST       | GPIO 3       | Digital  | Reset Hardware                 |
+| **SD Card**    | CS        | GPIO 1       | SPI      | Chip Select SD Card            |
+| **OLED**       | SDA       | GPIO 8       | I2C      | Data Display                   |
+|                | SCL       | GPIO 9       | I2C      | Clock Display                  |
+| **Buzzer**     | (+)       | GPIO 10      | PWM      | Indikator Audio                |
+
+> **Penting:** Pastikan implementasi perangkat keras mendukung penggunaan GPIO 4, 5, dan 6 secara paralel untuk dua perangkat SPI berbeda.
+
+---
+
+## Fitur Perangkat Lunak (Firmware)
+
+### Core Features
 
 - **Offline-First Capability:** Prioritas penyimpanan data lokal saat jaringan tidak tersedia atau tidak stabil.
-- **Partitioned Queue System:** Manajemen memori tingkat lanjut yang memecah penyimpanan data menjadi ratusan berkas kecil untuk mencegah _buffer overflow_ pada mikrokontroler.
-- **Smart Duplicate Prevention:** Algoritma _sliding window_ yang memindai indeks antrean lokal untuk menolak pemindaian kartu yang sama dalam periode waktu yang dikonfigurasi.
-- **Bulk Upload Efficiency:** Mengoptimalkan penggunaan _bandwidth_ dengan mengirimkan himpunan data (50 rekaman) dalam satu permintaan HTTP POST.
+- **Partitioned Queue System:** Manajemen memori tingkat lanjut yang memecah penyimpanan data menjadi berkas-berkas kecil untuk mencegah _buffer overflow_ pada mikrokontroler.
+- **Smart Duplicate Prevention:** Algoritma _sliding window_ yang memindai indeks antrean lokal untuk menolak pemindaian kartu yang sama dalam periode waktu yang dikonfigurasi (default: 30 menit).
+- **Bulk Upload Efficiency:** Mengoptimalkan penggunaan _bandwidth_ dengan mengirimkan himpunan data dalam satu permintaan HTTP POST.
 - **Hybrid Timekeeping:** Sinkronisasi waktu presisi menggunakan NTP saat daring, dan estimasi waktu berbasis RTC internal saat luring.
-- **Deep Sleep Scheduling:** Manajemen daya otomatis untuk menonaktifkan sistem di luar jam operasional.
+- **Deep Sleep Scheduling:** Manajemen daya otomatis untuk menonaktifkan sistem di luar jam operasional (default: 18:00–05:00).
 
-#### Advanced Features (v2.2.2+)
+### Advanced Features (v2.2.2+)
 
 - **Silent Background Sync:** Sinkronisasi data berjalan di latar belakang tanpa feedback visual atau audio yang mengganggu.
 - **Non-Intrusive Reconnect:** Auto-reconnect WiFi tanpa menampilkan loading screen atau progress bar.
 - **Zero-Interruption UX:** Pengguna dapat melakukan tapping RFID kapan saja tanpa terblokir oleh proses background.
 - **Thread-Safe Operations:** Implementasi dual-flag system (`isSyncing`, `isReconnecting`) untuk mencegah race condition.
 - **Smart Display Management:** Layar OLED hanya menampilkan informasi penting (status, waktu, queue counter) tanpa distraksi proses teknis.
-- **Legacy Storage Support:** Dukungan penuh untuk SD Card lama (128MB-256MB) menggunakan pustaka SdFat.
+- **Legacy Storage Support:** Dukungan penuh untuk SD Card lama (128MB–256MB) menggunakan pustaka SdFat.
 
-## Struktur Repositori
+### WiFi Optimization Features (v2.2.3+)
 
-Repositori ini mencakup kode sumber perangkat keras (firmware) dan dokumentasi pendukung.
+- **Maximum TX Power (19.5 dBm):** Jangkauan sinyal WiFi yang lebih jauh dan penetrasi lebih baik melalui penghalang.
+- **Modem Sleep Mode:** Efisiensi daya tanpa mengorbankan responsivitas jaringan.
+- **Signal-Based AP Selection:** Koneksi otomatis ke Access Point dengan sinyal terkuat (`WIFI_CONNECT_AP_BY_SIGNAL`).
+- **Persistent Connection:** Konfigurasi WiFi tersimpan di flash memory untuk boot yang lebih cepat.
+- **RSSI Monitoring:** Tampilan kekuatan sinyal (dBm) saat startup untuk keperluan diagnostik.
 
-```text
-.
-├── firmware/              # Kode sumber perangkat keras
-│   ├── v1.0.0/            # Versi Awal (Online Only)
-│   ├── v2.0.0/            # Versi Hibrida Awal (Single CSV)
-│   ├── v2.1.0/            # Versi Stabil (Queue System Base)
-│   ├── v2.2.0/            # Versi Ultimate (SdFat, Legacy Card Support, Optimized)
-│   ├── v2.2.1/            # Auto-Reconnect & Bug Fixes
-│   └── v2.2.2/            # Background Operations & Enhanced UX
-└── LICENSE                # Lisensi penggunaan proyek
+### OLED Auto Dim (v2.2.4+)
+
+- **Scheduled Display Control:** OLED otomatis mati pukul 08:00 dan nyala kembali pukul 14:00 (dapat dikonfigurasi).
+- **Smart Wake-up on Tap:** Display menyala sementara saat ada kartu yang di-tap, lalu kembali mati sesuai jadwal.
+- **Power Saving:** Mengurangi konsumsi daya display hingga 25% dan memperpanjang umur OLED 30–40%.
+- **Seamless Operation:** Proses tapping RFID tetap berjalan normal meskipun display mati.
+
+---
+
+## Konfigurasi Sistem
+
+Parameter operasional utama didefinisikan pada bagian awal kode sumber:
+
+```cpp
+// Konfigurasi Jaringan
+const char WIFI_SSID_1[]     PROGMEM = "SSID_WIFI_1";
+const char WIFI_SSID_2[]     PROGMEM = "SSID_WIFI_2";
+const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
+const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi2";
+const char API_BASE_URL[]    PROGMEM = "https://zedlabs.id";
+const char API_SECRET_KEY[]  PROGMEM = "SecretAPIToken";
+const char NTP_SERVER_1[]    PROGMEM = "pool.ntp.org";
+const char NTP_SERVER_2[]    PROGMEM = "time.google.com";
+const char NTP_SERVER_3[]    PROGMEM = "id.pool.ntp.org";
+const long GMT_OFFSET_SEC    = 25200; // WIB (UTC+7)
+
+// Konfigurasi Antrean
+const int MAX_RECORDS_PER_FILE      = 25;       // Optimasi RAM untuk ESP32-C3
+const int MAX_QUEUE_FILES           = 2000;     // Kapasitas total 50.000 record
+const unsigned long SYNC_INTERVAL   = 300000;   // Sinkronisasi setiap 5 menit (background)
+
+// Konfigurasi Validasi
+const unsigned long MIN_REPEAT_INTERVAL = 1800; // Debounce 30 menit untuk kartu sama
+
+// Konfigurasi Reconnect
+const unsigned long RECONNECT_INTERVAL  = 300000;  // Auto-reconnect setiap 5 menit
+const unsigned long TIME_SYNC_INTERVAL  = 3600000; // Time sync setiap 1 jam
+
+// Konfigurasi Sleep Mode
+const int SLEEP_START_HOUR = 18;  // Pukul 18:00 - Mesin Mati
+const int SLEEP_END_HOUR   = 5;   // Pukul 05:00 - Mesin Nyala
+
+// Konfigurasi OLED Auto Dim (v2.2.4)
+const int OLED_DIM_START_HOUR = 8;  // Pukul 08:00 - OLED Mati
+const int OLED_DIM_END_HOUR   = 14; // Pukul 14:00 - OLED Nyala
+
+// Konfigurasi Display
+const unsigned long DISPLAY_UPDATE_INTERVAL = 1000; // Update setiap 1 detik
 ```
 
-## Integrasi Backend
+---
 
-Untuk mendukung fungsionalitas sinkronisasi massal, server backend wajib menyediakan _endpoint_ API dengan spesifikasi sebagai berikut:
+## Mekanisme Antrean (Queue Logic)
 
-### Endpoint Sync Bulk
+1. **Segmentasi:** Data disimpan dalam berkas kecil (`queue_N.csv`) berisi maksimal 25 baris untuk mencegah _buffer overflow_.
+2. **Rotasi:** Saat berkas `queue_N` penuh, sistem otomatis membuat `queue_N+1`.
+3. **Sliding Window Duplicate Check:** Hanya memeriksa berkas antrean aktif dan 1 berkas sebelumnya — menjaga performa cepat meskipun data tersimpan sangat besar.
+4. **Sinkronisasi Background:**
+   - Sistem mencari berkas antrean yang ada secara sekuensial.
+   - Data dibaca, diparsing ke JSON, dan dikirim ke server tanpa feedback visual.
+   - Jika server merespons HTTP 200, berkas `queue_N` dihapus dari SD Card.
+   - Jika gagal, berkas dipertahankan untuk percobaan berikutnya.
+   - Proses ini **tidak mengganggu** operasi tapping RFID.
 
-- **URL Endpoint:** `/api/presensi/sync-bulk`
-- **Metode HTTP:** `POST`
-- **Header Wajib:**
-  - `Content-Type: application/json`
-  - `X-API-KEY: [Token Keamanan]`
-- **Format Payload (JSON):**
-  ```json
-  {
-  	"data": [
-  		{
-  			"rfid": "1234567890",
-  			"timestamp": "2025-12-07 07:00:00",
-  			"device_id": "ESP32_A1B2",
-  			"sync_mode": true
-  		}
-  	]
-  }
-  ```
-- **Respons:** Server harus mengembalikan kode status **HTTP 200 OK** untuk mengonfirmasi bahwa data telah disimpan. Kode respons selain 200 akan menyebabkan perangkat menyimpan kembali data tersebut dan mencoba pengiriman ulang di siklus berikutnya.
-
-### Endpoint Health Check
-
-- **URL Endpoint:** `/api/presensi/ping`
-- **Metode HTTP:** `GET`
-- **Header Wajib:**
-  - `X-API-KEY: [Token Keamanan]`
-- **Respons:** Server harus mengembalikan **HTTP 200 OK** jika service aktif dan dapat menerima data.
+---
 
 ## Background Operations Architecture
 
 ### Filosofi Desain
 
-Versi 2.2.2 menerapkan prinsip **"Invisible Infrastructure"** - semua operasi teknis (network, sync, reconnect) harus tidak terlihat oleh pengguna akhir. User experience harus fokus pada satu hal: **tap kartu → lihat feedback → selesai**.
+Sistem menerapkan prinsip **"Invisible Infrastructure"** — semua operasi teknis (network, sync, reconnect) harus tidak terlihat oleh pengguna akhir. User experience fokus pada satu hal: **tap kartu → lihat feedback → selesai**.
 
 ### Flow Diagram
 
@@ -152,183 +190,247 @@ Versi 2.2.2 menerapkan prinsip **"Invisible Infrastructure"** - semua operasi te
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Key Implementation Details
-
-1. **Flag-Based Synchronization**
-
-   ```cpp
-   // Global flags untuk thread safety
-   bool isSyncing = false;
-   bool isReconnecting = false;
-   ```
-
-2. **Silent WiFi Reconnect**
-
-   ```cpp
-   // connectToWiFiBackground() - tanpa display feedback
-   // - No OLED updates
-   // - No buzzer sounds
-   // - Non-blocking timeout
-   ```
-
-3. **Background Sync Process**
-   ```cpp
-   // syncAllQueues() - silent operation
-   // - Set isSyncing flag
-   // - No visual/audio feedback
-   // - Auto-cleanup after success
-   ```
-
-## User Experience Improvements
-
-### Before v2.2.2
-
-- Tampilan "CONNECTING WIFI..." mengganggu user
-- Progress bar "SYNCING File 0 (15)" membingungkan
-- Buzzer berbunyi saat background process
-- User harus menunggu saat reconnect/sync
-- Display penuh dengan informasi teknis
-
-### After v2.2.2
-
-- Display minimalis: hanya "TAP KARTU" dan info penting
-- Status ONLINE/OFFLINE update otomatis tanpa gangguan
-- Silent background operations (no sound, no loading)
-- Tapping RFID tidak pernah terblokir
-- Professional dan user-friendly
-- Queue counter transparan (Q:xx) jika ada pending data
-
-## Peta Jalan Pengembangan (Roadmap)
-
-Proyek ini dikembangkan secara bertahap menuju ekosistem manajemen kehadiran yang komprehensif:
-
-1.  **Versi 1.x (Selesai):** Presensi Daring Dasar.
-2.  **Versi 2.x (Stabil Saat Ini):** Sistem Hibrida, Antrean Offline Terpartisi, Sinkronisasi Massal, Auto Reconnect Wifi, Dukungan Penyimpanan Warisan (_Legacy Storage_), dan **Background Operations**.
-3.  **Versi 3.x (In Progress):** Integrasi Biometrik (Sidik Jari) sebagai metode autentikasi sekunder.
-4.  **Versi 4.x (Planned):** Ekspansi fungsi menjadi Buku Tamu Digital dan Integrasi PPDB.
-5.  **Versi 5.x (Planned):** Ekosistem Perpustakaan Pintar (Sirkulasi Mandiri).
-6.  **Versi 6.x (Future):** IoT Gateway & LoRaWAN untuk pemantauan area tanpa jangkauan seluler/WiFi.
-
-## Version History Highlights
-
-### v2.2.2 (Desember 2025) - Background Operations
-
-**Focus:** Enhanced UX through invisible infrastructure
-
-- Background WiFi reconnection (every 5 minutes)
-- Silent bulk sync operations
-- Zero-interruption tapping experience
-- Thread-safe dual-flag system
-- Minimalist display design
-
-### v2.2.1 (Desember 2025) - Stability & Auto-Reconnect
-
-- Automatic WiFi reconnection
-- System bug fixes and optimizations
-
-### v2.2.0 (Desember 2025) - Ultimate Edition
-
-- Migration to SdFat library
-- Legacy SD Card support (128MB+)
-- Memory optimization
-- Enhanced visual feedback
-
-### v2.1.0 - Queue System Foundation
-
-- Multi-file queue implementation
-- Sliding window duplicate check
-
-### v2.0.0 - Hybrid Architecture
-
-- Offline capability introduction
-- Single CSV queue system
-
-### v1.0.0 - Initial Release
-
-- Online-only operations
-- Basic RFID attendance
-
-## Installation & Configuration
-
-### Hardware Setup
-
-1. Connect components according to pinout specification
-2. Insert formatted SD Card (FAT16/FAT32)
-3. Power via USB 5V or Li-ion battery
-
-### Firmware Configuration
-
-Edit configuration constants in firmware source:
+### Implementasi Flag Thread-Safety
 
 ```cpp
-// Network Settings
-const char WIFI_SSID_1[] PROGMEM = "SSID_WIFI_1";
-const char WIFI_SSID_2[] PROGMEM = "SSID_WIFI_2";
-const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
-const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi2";
-const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
-const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
-const char NTP_SERVER_2[] PROGMEM = "time.google.com";
-const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
-
-// Queue Settings
-const int MAX_RECORDS_PER_FILE = 50;
-const int MAX_QUEUE_FILES = 1000;
-const unsigned long SYNC_INTERVAL = 300000;
-const unsigned long MAX_OFFLINE_AGE = 2592000;
-const unsigned long MIN_REPEAT_INTERVAL = 1800;
-const unsigned long TIME_SYNC_INTERVAL = 3600000;
-const unsigned long RECONNECT_INTERVAL = 300000;
-const int SLEEP_START_HOUR = 18;
-const int SLEEP_END_HOUR = 5;
-const long GMT_OFFSET_SEC = 25200;
+// Global flags untuk mencegah operasi paralel
+bool isSyncing      = false; // Mencegah sync bersamaan
+bool isReconnecting = false; // Mencegah reconnect bersamaan
 ```
 
-### Library Dependencies
+---
 
-Install via Arduino Library Manager:
+## OLED Auto Dim Schedule
 
-- `SdFat` by Bill Greiman (v2.x) - **Required**
-- `MFRC522` by GithubCommunity
-- `Adafruit SSD1306` & `Adafruit GFX`
-- `ArduinoJson`
+| Waktu         | Status OLED | Keterangan                          |
+| :------------ | :---------- | :---------------------------------- |
+| 00:00 – 07:59 | ON          | Display aktif untuk presensi pagi   |
+| 08:00 – 13:59 | OFF         | Display mati untuk hemat daya       |
+| 14:00 – 17:59 | ON          | Display aktif untuk presensi sore   |
+| 18:00 – 04:59 | SLEEP MODE  | Mesin deep sleep (termasuk display) |
+
+> Display tetap menyala sementara saat ada tapping RFID meskipun dalam periode dim.
+
+---
+
+## API Specification
+
+### Endpoint Sinkronisasi (Bulk)
+
+- **URL:** `/api/presensi/sync-bulk`
+- **Method:** `POST`
+- **Header:** `Content-Type: application/json`, `X-API-KEY: [SECRET_KEY]`
+- **Payload:**
+  ```json
+  {
+    "data": [
+      {
+        "rfid": "UID_KARTU",
+        "timestamp": "YYYY-MM-DD HH:MM:SS",
+        "device_id": "ESP32_MAC_ADDR",
+        "sync_mode": true
+      }
+    ]
+  }
+  ```
+- **Respons:** Server harus mengembalikan **HTTP 200 OK** untuk mengonfirmasi penerimaan data. Kode lain akan menyebabkan perangkat menyimpan kembali data dan mencoba pengiriman ulang di siklus berikutnya.
+
+### Endpoint Health Check
+
+- **URL:** `/api/presensi/ping`
+- **Method:** `GET`
+- **Header:** `X-API-KEY: [SECRET_KEY]`
+- **Respons:** HTTP 200 jika server aktif dan siap menerima data.
+
+---
+
+## Kompatibilitas Kartu SD
+
+Berkat implementasi `SdFat`, sistem mendukung berbagai jenis kartu memori:
+
+- **SDSC** (Standard Capacity) ≤ 2GB, termasuk kartu lama 128MB/256MB.
+- **SDHC** (High Capacity) 4GB – 32GB.
+- Format sistem berkas: **FAT16** dan **FAT32**.
+
+---
+
+## Prasyarat Instalasi Perangkat Lunak
+
+Install pustaka berikut melalui Arduino Library Manager:
+
+1. **SdFat** oleh Bill Greiman (Versi 2.x) — **Wajib**, menggantikan pustaka `SD` bawaan Arduino.
+2. **MFRC522** (GithubCommunity) — Driver RFID.
+3. **Adafruit SSD1306** & **Adafruit GFX** — Driver tampilan OLED.
+4. **ArduinoJson** — Serialisasi JSON.
+5. **WiFi**, **HTTPClient**, **Wire**, **SPI** — Pustaka inti ESP32.
+
+---
+
+## Struktur Repositori
+
+```text
+.
+├── firmware/
+│   ├── v1.0.0/     # Versi Awal (Online Only)
+│   ├── v2.0.0/     # Versi Hibrida Awal (Single CSV)
+│   ├── v2.1.0/     # Queue System Base
+│   ├── v2.2.0/     # Ultimate: SdFat, Legacy Card Support
+│   ├── v2.2.1/     # Auto-Reconnect & Bug Fixes
+│   ├── v2.2.2/     # Background Operations & Enhanced UX
+│   ├── v2.2.3/     # WiFi Signal Optimization
+│   └── v2.2.4/     # OLED Auto Dim
+└── LICENSE
+```
+
+---
+
+## Technical Specifications
+
+### Queue System
+
+| Parameter             | Nilai          |
+| :-------------------- | :------------- |
+| Max Records per File  | 25             |
+| Max Queue Files       | 2.000          |
+| Total Capacity        | 50.000 records |
+| Sync Interval         | 300 detik      |
+| Duplicate Check       | 1.800 detik    |
+
+### WiFi Configuration
+
+| Parameter          | Nilai                      |
+| :----------------- | :------------------------- |
+| TX Power           | 19.5 dBm (maksimal)        |
+| Sleep Mode         | WIFI_PS_MAX_MODEM          |
+| Sort Method        | WIFI_CONNECT_AP_BY_SIGNAL  |
+| Persistent         | Enabled                    |
+| Auto-Reconnect     | Enabled                    |
+| Reconnect Interval | 300 detik (5 menit)        |
+
+### Display & Power
+
+| Parameter              | Nilai                     |
+| :--------------------- | :------------------------ |
+| Display Update         | 1.000 ms (1 detik)        |
+| RSSI Bars              | 4 levels                  |
+| OLED Auto Dim          | 08:00 – 14:00 (default)   |
+| Deep Sleep             | 18:00 – 05:00 (default)   |
+| Modem Sleep            | WIFI_PS_MAX_MODEM         |
+
+### RSSI Interpretation
+
+| RSSI          | Kualitas         |
+| :------------ | :--------------- |
+| ≥ -50 dBm     | Sangat Kuat      |
+| -67 dBm       | Kuat (4 bar)     |
+| -70 dBm       | Baik (3 bar)     |
+| -80 dBm       | Cukup (2 bar)    |
+| -90 dBm       | Lemah (1 bar)    |
+| < -90 dBm     | Sangat Lemah     |
+
+---
 
 ## Troubleshooting
 
-### Common Issues
+**Masalah: WiFi sering disconnect**
+Pastikan perangkat dalam jangkauan yang cukup (RSSI di atas -70 dBm). Periksa interferensi pada frekuensi 2.4 GHz dan stabilitas power supply (minimal 5V 1A).
 
-**Issue:** Sync appears slow or blocked  
-**Solution:** Ensure no `showOLED()` or `playTone()` calls exist inside `syncAllQueues()`. All feedback must be removed for optimal background operations.
+**Masalah: Sync lambat atau terblokir**
+Pastikan tidak ada `showOLED()` atau `playTone()` di dalam fungsi `chunkedSync()` atau `syncAllQueues()`. Semua feedback visual harus dihapus untuk operasi background yang optimal.
 
-**Issue:** Double sync/reconnect operations  
-**Solution:** Check `isSyncing` and `isReconnecting` flag implementation. Flags must be set before operation and cleared after completion.
+**Masalah: Double sync/reconnect**
+Periksa implementasi flag `isSyncing` dan `isReconnecting`. Flag harus di-set sebelum operasi dimulai dan di-clear setelah selesai.
 
-**Issue:** Display not updating online/offline status  
-**Solution:** Verify `showStandbySignal()` reads `isOnline` variable that's constantly updated in main loop.
+**Masalah: OLED tidak mati/menyala sesuai jadwal**
+Pastikan waktu sistem sudah tersinkronisasi dengan NTP server. Periksa nilai `OLED_DIM_START_HOUR` dan `OLED_DIM_END_HOUR` di konfigurasi.
 
-**Issue:** RFID tapping feels laggy  
-**Solution:** Check for blocking operations in main loop. All network operations must be background-only.
+**Masalah: Display tidak update status online/offline**
+Pastikan `updateStandbySignal()` membaca variabel `isOnline` yang selalu diperbarui di loop utama.
 
-## Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Focus on user experience and responsiveness
-2. Keep background operations silent and non-intrusive
-3. Maintain backward compatibility with existing API
-4. Document all configuration changes
-5. Test thoroughly with various SD Card types
+---
 
 ## Performance Metrics
 
-- **Tap-to-Feedback Latency:** < 200ms
-- **Background Sync Frequency:** Every 5 minutes (configurable)
-- **Auto-Reconnect Interval:** Every 5 minutes (configurable)
-- **Queue Capacity:** Up to 50,000 records (1000 files × 50 records)
-- **Time Sync Accuracy:** ±1 second (NTP-based)
-- **Power Consumption:** ~150mA active, <5mA deep sleep
+| Metrik                     | Nilai                      |
+| :------------------------- | :------------------------- |
+| Tap-to-Feedback Latency    | < 200ms                    |
+| Background Sync Frequency  | Setiap 5 menit             |
+| Auto-Reconnect Interval    | Setiap 5 menit             |
+| Queue Capacity             | 50.000 records             |
+| Time Sync Accuracy         | ±1 detik (NTP)             |
+| Power (Active)             | ~150mA                     |
+| Power (Deep Sleep)         | < 5mA                      |
+
+---
+
+## Riwayat Perubahan (Changelog)
+
+### v2.2.4 (Desember 2025) — OLED Auto Dim
+- Scheduled Display Control: OLED otomatis mati pukul 08:00, nyala pukul 14:00
+- Smart Wake-up: Display menyala sementara saat ada kartu yang di-tap
+- Power Saving: Pengurangan konsumsi daya hingga 25%
+- OLED Longevity: Perpanjangan umur display hingga 30–40%
+- Implementasi flag `oledIsOn` untuk tracking status display
+
+### v2.2.3 (Desember 2025) — WiFi Signal Optimization
+- Maximum TX Power: Set WiFi TX Power ke 19.5 dBm untuk jangkauan maksimal
+- Modem Sleep Mode: Implementasi WIFI_PS_MAX_MODEM untuk efisiensi daya
+- Signal-Based AP Selection: Koneksi otomatis ke AP dengan sinyal terkuat
+- Persistent Mode: WiFi persistent dan auto-reconnect untuk stabilitas
+- RSSI Display: Tampilan kekuatan sinyal saat startup untuk monitoring
+- Optimized Queue Config: MAX_RECORDS_PER_FILE ke 25, MAX_QUEUE_FILES ke 2000
+
+### v2.2.2 (Desember 2025) — Background Operations
+- Background WiFi Reconnect: Reconnect otomatis setiap 5 menit tanpa tampilan
+- Background Bulk Sync: Sinkronisasi data offline di latar belakang
+- Dual Process Flags: Implementasi `isSyncing` dan `isReconnecting`
+- Silent Operations: Semua operasi network tanpa feedback visual/audio
+- Enhanced UX: Display fokus pada informasi penting (status, waktu, queue counter)
+
+### v2.2.1 (Desember 2025) — Stability & Auto-Reconnect
+- Penambahan Fitur Autoconnect WiFi
+- Perbaikan Bug System Versi 2.2.0
+
+### v2.2.0 (Desember 2025) — Ultimate Edition
+- Migrasi ke `SdFat`
+- Dukungan kartu memori legacy (128MB+)
+- Optimasi buffer memori
+- Perbaikan visual interface
+
+### v2.1.0 — Queue System Foundation
+- Pengenalan sistem antrean multi-file
+- Sliding window duplicate check
+
+### v2.0.0 — Hybrid Architecture
+- Implementasi mode offline dasar (single CSV)
+
+### v1.0.0 — Initial Release
+- Rilis awal (Online only)
+
+---
+
+## Peta Jalan Pengembangan (Roadmap)
+
+1. **Versi 1.x** — Presensi Daring Dasar.
+2. **Versi 2.x** — Sistem Hibrida, Queue Offline Terpartisi, Sinkronisasi Massal, Auto Reconnect, Legacy Storage, Background Operations, WiFi Optimization, OLED Auto Dim.
+3. **Versi 3.x** — Integrasi Biometrik (Sidik Jari) sebagai metode autentikasi sekunder.
+4. **Versi 4.x** — Ekspansi fungsi menjadi Buku Tamu Digital dan Integrasi PPDB.
+5. **Versi 5.x** — Ekosistem Perpustakaan Pintar (Sirkulasi Mandiri).
+6. **Versi 6.x** — IoT Gateway & LoRaWAN untuk area tanpa jangkauan seluler/WiFi.
+
+---
+
+## Best Practices
+
+1. **Penempatan Perangkat:** Letakkan pada lokasi dengan sinyal WiFi yang baik (RSSI di atas -70 dBm). Gunakan RSSI display saat startup untuk monitoring.
+2. **Power Supply:** Gunakan power supply stabil 5V 1A minimum untuk menghindari brownout saat transmisi WiFi daya maksimal.
+3. **Multiple Access Points:** Jika deployment menggunakan beberapa AP, pastikan semua memiliki SSID dan password yang sama agar sistem dapat memilih AP terbaik otomatis.
+4. **Background Process:** Biarkan background sync dan reconnect berjalan otomatis. Tidak perlu intervensi manual.
+5. **Jangan Tambah Feedback Visual di Background:** Semua operasi dalam `periodicSync()` dan `connectToWiFiBackground()` harus silent.
+6. **Jadwal OLED:** Sesuaikan `OLED_DIM_START_HOUR` dan `OLED_DIM_END_HOUR` dengan pola aktivitas presensi di lokasi deployment.
+
+---
 
 ## Lisensi
 
-Hak Cipta © 2025 Yahya Zulfikri. Proyek ini didistribusikan di bawah MIT License. Penggunaan, modifikasi, dan distribusi diperbolehkan dengan menyertakan atribusi yang sesuai.
+Hak Cipta 2025 Yahya Zulfikri. Kode sumber ini dilisensikan di bawah MIT License untuk penggunaan pendidikan dan pengembangan profesional.
