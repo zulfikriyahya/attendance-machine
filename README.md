@@ -170,9 +170,9 @@ Sistem menerapkan prinsip **"Invisible Infrastructure"** — semua operasi tekni
 │  [Tap RFID Card] → [Save to Queue] → [Success Feedback]     │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
-                            ▲
-                            │ Non-blocking
-                            │
+                              ▲
+                              │ Non-blocking
+                              │
 ┌─────────────────────────────────────────────────────────────┐
 │                  BACKGROUND OPERATIONS                      │
 │                                                             │
