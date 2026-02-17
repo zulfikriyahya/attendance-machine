@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diagram Logika Sistem Presensi v2.3.0</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap');
+
+    :root {
+      --bg: #0a0c10;
+      --bg2: #0f1218;
+      --panel: #141820;
+      --border: #1e2530;
+      --accent: #00d4ff;
+      --accent2: #7c3aed;
+      --green: #10b981;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --orange: #f97316;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Syne', sans-serif;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    /* HEADER */
+    header {
+      text-align: center;
+      margin-bottom: 56px;
+    }
+
+    header .badge {
+      display: inline-block;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--accent);
+      border: 1px solid rgba(0, 212, 255, 0.3);
+      border-radius: 2px;
+      padding: 4px 12px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+    }
+
+    header h1 {
+      font-family: var(--sans);
+      font-size: clamp(22px, 4vw, 36px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #fff 40%, var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    header p {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+    }
+
+    /* SECTION LABELS */
+    .section-label {
+      font-size: 9px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+      padding-left: 2px;
+    }
+
+    /* ─── FLOW DIAGRAM ─── */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    /* NODE TYPES */
+    .node {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      animation: fadeUp 0.4s ease both;
+    }
+
+    /* Terminal (oval) */
+    .node-terminal {
+      width: 180px;
+      height: 48px;
+      border-radius: 24px;
+      background: linear-gradient(135deg, var(--accent2), #4c1d95);
+      border: 1px solid rgba(124, 58, 237, 0.6);
+      box-shadow: 0 0 20px rgba(124, 58, 237, 0.3);
+      color: #fff;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    /* Process (rect) */
+    .node-process {
+      width: 280px;
+      padding: 14px 20px;
+      border-radius: 4px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .node-process.highlight {
+      border-color: rgba(0, 212, 255, 0.4);
+      background: rgba(0, 212, 255, 0.05);
+      box-shadow: 0 0 12px rgba(0, 212, 255, 0.08);
+    }
+
+    /* Decision (diamond) */
+    .node-decision {
+      width: 200px;
+      height: 200px;
+      position: relative;
+    }
+
+    .node-decision .diamond {
+      position: absolute;
+      inset: 0;
+      transform: rotate(45deg);
+      background: var(--panel);
+      border: 1.5px solid var(--yellow);
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.15);
+    }
+
+    .node-decision .label {
+      position: relative;
+      z-index: 1;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--yellow);
+      padding: 0 20px;
+      line-height: 1.5;
+    }
+
+    /* Result boxes */
+    .node-result {
+      padding: 12px 18px;
+      border-radius: 4px;
+      font-size: 11px;
+      min-width: 140px;
+      text-align: center;
+    }
+
+    .node-result.success {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.5);
+      color: var(--green);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.1);
+    }
+
+    .node-result.error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      color: var(--red);
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.1);
+    }
+
+    .node-result.info {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: var(--yellow);
+    }
+
+    /* ARROWS */
+    .arrow {
+      width: 2px;
+      background: linear-gradient(to bottom, var(--border), var(--muted));
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .arrow::after {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(45deg);
+      margin-top: -5px;
+    }
+
+    .arrow.accent {
+      background: linear-gradient(to bottom, var(--accent), rgba(0, 212, 255, 0.3));
+    }
+
+    .arrow.accent::after {
+      border-color: var(--accent);
+    }
+
+    .arrow.green {
+      background: linear-gradient(to bottom, var(--green), rgba(16, 185, 129, 0.3));
+    }
+
+    .arrow.green::after {
+      border-color: var(--green);
+    }
+
+    .arrow.red {
+      background: linear-gradient(to bottom, var(--red), rgba(239, 68, 68, 0.3));
+    }
+
+    .arrow.red::after {
+      border-color: var(--red);
+    }
+
+    .arrow-label {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+      background: var(--bg);
+      padding: 2px 6px;
+    }
+
+    .arrow-label.right {
+      left: auto;
+      right: 10px;
+    }
+
+    /* FORK: two parallel paths */
+    .fork-container {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      position: relative;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .fork-line {
+      position: absolute;
+      top: 0;
+      height: 2px;
+      background: var(--border);
+    }
+
+    .fork-path {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* HORIZONTAL connector */
+    .h-line {
+      height: 2px;
+      background: var(--border);
+      align-self: stretch;
+    }
+
+    /* JOIN line */
+    .join-line {
+      height: 2px;
+      background: var(--border);
+    }
+
+    /* ─── SWIMLANE LAYOUT ─── */
+    .swimlane-wrapper {
+      width: 100%;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+
+    .swimlane {
+      display: grid;
+      grid-template-columns: 120px 1fr 1fr 1fr;
+      gap: 0;
+      min-width: 700px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .lane-header {
+      padding: 10px 14px;
+      font-size: 9px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+    }
+
+    .lane-header.h1 {
+      color: var(--accent);
+      border-right: 1px solid var(--border);
+    }
+
+    .lane-header.h2 {
+      color: var(--green);
+      border-right: 1px solid var(--border);
+    }
+
+    .lane-header.h3 {
+      color: var(--yellow);
+      border-right: 1px solid var(--border);
+    }
+
+    .lane-header.h4 {
+      color: var(--accent2);
+    }
+
+    .lane-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      writing-mode: vertical-rl;
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      color: var(--muted);
+      text-transform: uppercase;
+      border-right: 1px solid var(--border);
+      padding: 16px 8px;
+      background: var(--bg2);
+    }
+
+    .lane-content {
+      padding: 16px 12px;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .lane-content:last-child {
+      border-right: none;
+    }
+
+    .step {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 8px 10px;
+      font-size: 10px;
+      line-height: 1.5;
+      position: relative;
+    }
+
+    .step::before {
+      content: attr(data-n);
+      position: absolute;
+      top: -8px;
+      left: 8px;
+      font-size: 8px;
+      background: var(--bg);
+      padding: 0 4px;
+      color: var(--muted);
+    }
+
+    .step.s-rfid {
+      border-left: 2px solid var(--accent);
+    }
+
+    .step.s-fp {
+      border-left: 2px solid var(--green);
+    }
+
+    .step.s-ok {
+      border-left: 2px solid var(--green);
+      background: rgba(16, 185, 129, 0.06);
+    }
+
+    .step.s-err {
+      border-left: 2px solid var(--red);
+      background: rgba(239, 68, 68, 0.06);
+    }
+
+    .step.s-info {
+      border-left: 2px solid var(--yellow);
+    }
+
+    .step.s-shared {
+      border-left: 2px solid var(--accent2);
+    }
+
+    /* ─── MAIN FLOW VISUAL ─── */
+    svg.flow-svg {
+      width: 100%;
+      max-width: 900px;
+      display: block;
+      margin: 0 auto;
+    }
+
+    /* Legend */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 32px;
+      padding: 16px 20px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .legend-box {
+      width: 28px;
+      height: 14px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* SECTIONS */
+    .section {
+      margin-bottom: 48px;
+    }
+
+    /* ANIMATIONS */
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 20px rgba(124, 58, 237, 0.3);
+      }
+
+      50% {
+        box-shadow: 0 0 32px rgba(124, 58, 237, 0.6);
+      }
+    }
+
+    .node-terminal {
+      animation: fadeUp 0.4s ease both, pulse 3s ease infinite;
+    }
+
+    /* Scan glow */
+    .glow-accent {
+      box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.2), 0 0 16px rgba(0, 212, 255, 0.1);
+    }
+
+    .glow-green {
+      box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2), 0 0 16px rgba(16, 185, 129, 0.1);
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+      margin: 48px 0;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrapper">
+
+    <!-- HEADER -->
+    <header>
+      <div class="badge">v2.3.0 · ESP32-C3 + MFRC522 + HLK-ZW101</div>
+      <h1>Diagram Logika Sistem Presensi</h1>
+      <p>RFID & Fingerprint → Queue → API Sync</p>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════
+       DIAGRAM 1: MAIN LOOP FLOW
+  ═══════════════════════════════════════════════════ -->
+    <div class="section">
+      <div class="section-label">01 — Alur Utama (Main Loop)</div>
+
+      <svg class="flow-svg" viewBox="0 0 860 1060" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 Z" fill="#475569" />
+          </marker>
+          <marker id="arr-accent" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 Z" fill="#00d4ff" />
+          </marker>
+          <marker id="arr-green" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 Z" fill="#10b981" />
+          </marker>
+          <marker id="arr-red" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 Z" fill="#ef4444" />
+          </marker>
+          <marker id="arr-yellow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 Z" fill="#f59e0b" />
+          </marker>
+          <filter id="glow-c">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="glow-g">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        <!-- BG -->
+        <rect width="860" height="1060" fill="#0a0c10" />
+        <!-- Grid -->
+        <pattern id="grid" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(0,212,255,0.03)" stroke-width="1" />
+        </pattern>
+        <rect width="860" height="1060" fill="url(#grid)" />
+
+        <!-- ─── START ─── -->
+        <rect x="310" y="24" width="240" height="48" rx="24" fill="#3b0764" stroke="#7c3aed" stroke-width="1.5" />
+        <text x="430" y="44" text-anchor="middle" fill="#e2e8f0" font-family="Syne,sans-serif" font-size="13"
+          font-weight="700">POWER ON</text>
+        <text x="430" y="62" text-anchor="middle" fill="#a78bfa" font-family="JetBrains Mono,monospace"
+          font-size="10">setup()</text>
+
+        <!-- Arrow down -->
+        <line x1="430" y1="72" x2="430" y2="104" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- INIT BOX -->
+        <rect x="290" y="104" width="280" height="56" rx="3" fill="#141820" stroke="#1e2530" stroke-width="1" />
+        <text x="430" y="126" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace"
+          font-size="10">Init: SD Card · ZW101 · WiFi</text>
+        <text x="430" y="144" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace"
+          font-size="10">RFID RC522 · NTP · API Ping</text>
+
+        <!-- Arrow -->
+        <line x1="430" y1="160" x2="430" y2="192" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- LOOP LABEL -->
+        <text x="450" y="183" fill="#475569" font-family="JetBrains Mono,monospace" font-size="9"
+          letter-spacing="2">loop()</text>
+
+        <!-- ─── DECISION: ENROLL MODE? ─── -->
+        <!-- Diamond -->
+        <rect x="360" y="200" width="140" height="140" rx="2" fill="#141820" stroke="#f59e0b" stroke-width="1.5"
+          transform="rotate(45 430 270)" />
+        <text x="430" y="264" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">ENROLL</text>
+        <text x="430" y="280" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">MODE?</text>
+
+        <!-- YES → left -->
+        <line x1="334" y1="270" x2="200" y2="270" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-yellow)" />
+        <text x="260" y="262" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="9">YA</text>
+        <rect x="100" y="246" width="100" height="48" rx="3" fill="rgba(245,158,11,0.08)" stroke="rgba(245,158,11,0.5)"
+          stroke-width="1" />
+        <text x="150" y="267" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">handleFP</text>
+        <text x="150" y="283" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">Enroll()</text>
+        <!-- return -->
+        <line x1="150" y1="294" x2="150" y2="340" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3" />
+        <text x="156" y="330" fill="#475569" font-family="JetBrains Mono,monospace" font-size="8">return</text>
+
+        <!-- NO → down -->
+        <line x1="430" y1="340" x2="430" y2="376" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="448" y="360" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">TIDAK</text>
+
+        <!-- ─── DECISION: RFID? ─── -->
+        <rect x="360" y="380" width="140" height="140" rx="2" fill="#141820" stroke="#00d4ff" stroke-width="1.5"
+          transform="rotate(45 430 450)" />
+        <text x="430" y="440" text-anchor="middle" fill="#00d4ff" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">KARTU</text>
+        <text x="430" y="456" text-anchor="middle" fill="#00d4ff" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">DITAP?</text>
+
+        <!-- YES → right -->
+        <line x1="526" y1="450" x2="640" y2="450" stroke="#00d4ff" stroke-width="1.5" marker-end="url(#arr-accent)"
+          filter="url(#glow-c)" />
+        <text x="578" y="442" text-anchor="middle" fill="#00d4ff" font-family="JetBrains Mono,monospace"
+          font-size="9">YA</text>
+        <rect x="640" y="426" width="130" height="48" rx="3" fill="rgba(0,212,255,0.06)" stroke="rgba(0,212,255,0.5)"
+          stroke-width="1" />
+        <text x="705" y="447" text-anchor="middle" fill="#00d4ff" font-family="JetBrains Mono,monospace"
+          font-size="10">handleRFID</text>
+        <text x="705" y="463" text-anchor="middle" fill="#00d4ff" font-family="JetBrains Mono,monospace"
+          font-size="10">Scan()</text>
+        <!-- → kirimPresensi -->
+        <line x1="705" y1="474" x2="705" y2="510" stroke="#00d4ff" stroke-width="1.5" marker-end="url(#arr-accent)" />
+        <rect x="640" y="510" width="130" height="36" rx="3" fill="rgba(124,58,237,0.1)" stroke="rgba(124,58,237,0.5)"
+          stroke-width="1" />
+        <text x="705" y="533" text-anchor="middle" fill="#a78bfa" font-family="JetBrains Mono,monospace"
+          font-size="10">kirimPresensi()</text>
+        <line x1="705" y1="546" x2="705" y2="580" stroke="#00d4ff" stroke-width="1" stroke-dasharray="4,3" />
+        <text x="712" y="570" fill="#475569" font-family="JetBrains Mono,monospace" font-size="8">return</text>
+
+        <!-- NO → down -->
+        <line x1="430" y1="520" x2="430" y2="556" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="448" y="540" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">TIDAK</text>
+
+        <!-- ─── DECISION: JARI? ─── -->
+        <rect x="360" y="560" width="140" height="140" rx="2" fill="#141820" stroke="#10b981" stroke-width="1.5"
+          transform="rotate(45 430 630)" />
+        <text x="430" y="620" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">JARI</text>
+        <text x="430" y="636" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">TERDETEKSI?</text>
+
+        <!-- YES → right -->
+        <line x1="526" y1="630" x2="640" y2="630" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr-green)"
+          filter="url(#glow-g)" />
+        <text x="578" y="622" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace"
+          font-size="9">YA</text>
+        <rect x="640" y="606" width="130" height="48" rx="3" fill="rgba(16,185,129,0.06)" stroke="rgba(16,185,129,0.5)"
+          stroke-width="1" />
+        <text x="705" y="627" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace"
+          font-size="10">handleFP</text>
+        <text x="705" y="643" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace"
+          font-size="10">Scan()</text>
+        <!-- → kirimPresensi -->
+        <line x1="705" y1="654" x2="705" y2="690" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr-green)" />
+        <rect x="640" y="690" width="130" height="36" rx="3" fill="rgba(124,58,237,0.1)" stroke="rgba(124,58,237,0.5)"
+          stroke-width="1" />
+        <text x="705" y="713" text-anchor="middle" fill="#a78bfa" font-family="JetBrains Mono,monospace"
+          font-size="10">kirimPresensi()</text>
+
+        <!-- NO → down -->
+        <line x1="430" y1="700" x2="430" y2="736" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="448" y="720" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">TIDAK</text>
+
+        <!-- ─── BACKGROUND TASKS ─── -->
+        <rect x="290" y="736" width="280" height="72" rx="3" fill="#141820" stroke="#1e2530" stroke-width="1" />
+        <text x="310" y="758" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">·
+          processReconnect()</text>
+        <text x="310" y="774" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">·
+          updateDisplay()</text>
+        <text x="310" y="790" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">· chunkedSync() /
+          periodicTimeSync()</text>
+
+        <!-- Arrow -->
+        <line x1="430" y1="808" x2="430" y2="844" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- ─── DECISION: JAM TIDUR? ─── -->
+        <rect x="360" y="848" width="140" height="140" rx="2" fill="#141820" stroke="#7c3aed" stroke-width="1.5"
+          transform="rotate(45 430 918)" />
+        <text x="430" y="908" text-anchor="middle" fill="#a78bfa" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">JAM</text>
+        <text x="430" y="924" text-anchor="middle" fill="#a78bfa" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">SLEEP?</text>
+
+        <!-- YES → right: deep sleep -->
+        <line x1="526" y1="918" x2="620" y2="918" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arr-yellow)" />
+        <text x="568" y="910" text-anchor="middle" fill="#a78bfa" font-family="JetBrains Mono,monospace"
+          font-size="9">YA ≥18:00</text>
+        <rect x="620" y="895" width="120" height="48" rx="24" fill="#1e1235" stroke="#7c3aed" stroke-width="1.5" />
+        <text x="680" y="916" text-anchor="middle" fill="#a78bfa" font-family="Syne,sans-serif" font-size="11"
+          font-weight="700">DEEP SLEEP</text>
+        <text x="680" y="932" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">bangun 05:00</text>
+
+        <!-- NO → loop back left -->
+        <line x1="334" y1="918" x2="54" y2="918" stroke="#475569" stroke-width="1.5" />
+        <line x1="54" y1="918" x2="54" y2="270" stroke="#475569" stroke-width="1.5" />
+        <line x1="54" y1="270" x2="100" y2="270" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="46" y="600" fill="#1e2530" font-family="JetBrains Mono,monospace" font-size="9"
+          transform="rotate(-90 46 600)">ULANG LOOP</text>
+        <text x="380" y="960" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">TIDAK · yield()</text>
+
+        <!-- ─── SHARED kirimPresensi label ─── -->
+        <rect x="346" y="1012" width="168" height="24" rx="2" fill="rgba(124,58,237,0.08)" stroke="rgba(124,58,237,0.3)"
+          stroke-width="1" />
+        <text x="430" y="1028" text-anchor="middle" fill="#7c3aed" font-family="JetBrains Mono,monospace"
+          font-size="9">Fungsi bersama RFID &amp; FP</text>
+      </svg>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ═══════════════════════════════════════════════════
+       DIAGRAM 2: kirimPresensi() DETAIL
+  ═══════════════════════════════════════════════════ -->
+    <div class="section">
+      <div class="section-label">02 — Detail kirimPresensi() · Fungsi Bersama RFID & Fingerprint</div>
+
+      <svg class="flow-svg" viewBox="0 0 860 580" xmlns="http://www.w3.org/2000/svg">
+        <rect width="860" height="580" fill="#0a0c10" />
+        <rect width="860" height="580" fill="url(#grid)" />
+
+        <!-- ENTRY: dua input -->
+        <!-- RFID pill -->
+        <rect x="100" y="24" width="160" height="40" rx="20" fill="rgba(0,212,255,0.1)" stroke="rgba(0,212,255,0.6)"
+          stroke-width="1.5" />
+        <text x="180" y="39" text-anchor="middle" fill="#00d4ff" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">RFID UID</text>
+        <text x="180" y="55" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">"0001234567"</text>
+
+        <!-- FP pill -->
+        <rect x="600" y="24" width="160" height="40" rx="20" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.6)"
+          stroke-width="1.5" />
+        <text x="680" y="39" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">FP ID</text>
+        <text x="680" y="55" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">"FP_00003"</text>
+
+        <!-- konverge ke kirimPresensi -->
+        <line x1="180" y1="64" x2="180" y2="92" stroke="#00d4ff" stroke-width="1.5" marker-end="url(#arr-accent)" />
+        <line x1="680" y1="64" x2="680" y2="92" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr-green)" />
+        <line x1="180" y1="92" x2="430" y2="92" stroke="#475569" stroke-width="1.5" />
+        <line x1="680" y1="92" x2="430" y2="92" stroke="#475569" stroke-width="1.5" />
+        <line x1="430" y1="92" x2="430" y2="112" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- kirimPresensi box -->
+        <rect x="290" y="112" width="280" height="48" rx="3" fill="rgba(124,58,237,0.1)" stroke="rgba(124,58,237,0.6)"
+          stroke-width="1.5" />
+        <text x="430" y="134" text-anchor="middle" fill="#a78bfa" font-family="Syne,sans-serif" font-size="12"
+          font-weight="700">kirimPresensi(uid)</text>
+        <text x="430" y="150" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">getFormattedTimestamp() · time(nullptr)</text>
+
+        <line x1="430" y1="160" x2="430" y2="192" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- DECISION: SD tersedia? -->
+        <rect x="360" y="196" width="140" height="140" rx="2" fill="#141820" stroke="#f59e0b" stroke-width="1.5"
+          transform="rotate(45 430 266)" />
+        <text x="430" y="256" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">SD CARD</text>
+        <text x="430" y="272" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">TERSEDIA?</text>
+
+        <!-- NO → right: error -->
+        <line x1="526" y1="266" x2="640" y2="266" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr-red)" />
+        <text x="578" y="258" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace"
+          font-size="9">TIDAK</text>
+        <rect x="640" y="246" width="140" height="40" rx="3" fill="rgba(239,68,68,0.08)" stroke="rgba(239,68,68,0.5)"
+          stroke-width="1" />
+        <text x="710" y="262" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace"
+          font-size="10">"NO WIFI &amp; SD"</text>
+        <text x="710" y="278" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace"
+          font-size="9">return false</text>
+
+        <!-- YES → down -->
+        <line x1="430" y1="336" x2="430" y2="368" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="448" y="354" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">YA</text>
+
+        <!-- DECISION: Duplikat? -->
+        <rect x="360" y="372" width="140" height="140" rx="2" fill="#141820" stroke="#f59e0b" stroke-width="1.5"
+          transform="rotate(45 430 442)" />
+        <text x="430" y="432" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">DUPLIKAT</text>
+        <text x="430" y="448" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="9">&lt; 30 menit?</text>
+
+        <!-- YES → right: cukup sekali -->
+        <line x1="526" y1="442" x2="640" y2="442" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-yellow)" />
+        <text x="578" y="434" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="9">YA</text>
+        <rect x="640" y="422" width="140" height="40" rx="3" fill="rgba(245,158,11,0.08)" stroke="rgba(245,158,11,0.4)"
+          stroke-width="1" />
+        <text x="710" y="438" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">"CUKUP SEKALI!"</text>
+        <text x="710" y="454" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="9">return false</text>
+
+        <!-- NO → down -->
+        <line x1="430" y1="512" x2="430" y2="540" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr-green)" />
+        <text x="448" y="528" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">TIDAK</text>
+        <!-- saveToQueue -->
+        <rect x="290" y="540" width="280" height="32" rx="3" fill="rgba(16,185,129,0.08)" stroke="rgba(16,185,129,0.5)"
+          stroke-width="1" />
+        <text x="430" y="562" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11"
+          font-weight="600">saveToQueue() → "DATA TERSIMPAN"</text>
+      </svg>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ═══════════════════════════════════════════════════
+       DIAGRAM 3: FINGERPRINT SCAN DETAIL
+  ═══════════════════════════════════════════════════ -->
+    <div class="section">
+      <div class="section-label">03 — Detail handleFingerprintScan() · ZW101 Matching</div>
+
+      <svg class="flow-svg" viewBox="0 0 860 600" xmlns="http://www.w3.org/2000/svg">
+        <rect width="860" height="600" fill="#0a0c10" />
+        <rect width="860" height="600" fill="url(#grid)" />
+
+        <!-- START -->
+        <rect x="330" y="24" width="200" height="40" rx="20" fill="rgba(16,185,129,0.12)" stroke="rgba(16,185,129,0.6)"
+          stroke-width="1.5" />
+        <text x="430" y="49" text-anchor="middle" fill="#10b981" font-family="Syne,sans-serif" font-size="12"
+          font-weight="700">handleFingerprintScan()</text>
+
+        <line x1="430" y1="64" x2="430" y2="96" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr-green)" />
+
+        <!-- Step 1: fpGetImage -->
+        <rect x="290" y="96" width="280" height="40" rx="3" fill="#141820" stroke="rgba(16,185,129,0.4)"
+          stroke-width="1" />
+        <text x="430" y="115" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace"
+          font-size="10">① fpGetImage()</text>
+        <text x="430" y="129" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">Ambil gambar dari sensor ZW101</text>
+
+        <line x1="430" y1="136" x2="430" y2="168" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- DECISION: Ada jari? -->
+        <rect x="360" y="172" width="140" height="140" rx="2" fill="#141820" stroke="#f59e0b" stroke-width="1.5"
+          transform="rotate(45 430 242)" />
+        <text x="430" y="232" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">FP_NOFINGER</text>
+        <text x="430" y="248" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">?</text>
+
+        <!-- YES → left: return -->
+        <line x1="334" y1="242" x2="200" y2="242" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="262" y="234" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">YA</text>
+        <rect x="100" y="222" width="100" height="40" rx="3" fill="#0f1218" stroke="#1e2530" stroke-width="1" />
+        <text x="150" y="239" text-anchor="middle" fill="#475569" font-family="JetBrains Mono,monospace"
+          font-size="10">skip</text>
+        <text x="150" y="255" text-anchor="middle" fill="#475569" font-family="JetBrains Mono,monospace"
+          font-size="9">return</text>
+
+        <!-- NO → down -->
+        <line x1="430" y1="312" x2="430" y2="344" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="448" y="330" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">TIDAK</text>
+
+        <!-- Step 2: fpImage2Tz -->
+        <rect x="290" y="344" width="280" height="40" rx="3" fill="#141820" stroke="rgba(16,185,129,0.4)"
+          stroke-width="1" />
+        <text x="430" y="361" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace"
+          font-size="10">② fpImage2Tz(slot=1)</text>
+        <text x="430" y="377" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">Ekstrak fitur ke buffer internal ZW101</text>
+
+        <line x1="430" y1="384" x2="430" y2="416" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- Step 3: fpSearch -->
+        <rect x="290" y="416" width="280" height="40" rx="3" fill="#141820" stroke="rgba(16,185,129,0.4)"
+          stroke-width="1" />
+        <text x="430" y="433" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace"
+          font-size="10">③ fpSearch(1→N matching)</text>
+        <text x="430" y="449" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">Bandingkan buffer vs semua template</text>
+
+        <line x1="430" y1="456" x2="430" y2="488" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- RESULT: cocok? -->
+        <!-- left: tidak cocok -->
+        <line x1="430" y1="488" x2="200" y2="488" stroke="#ef4444" stroke-width="1.5" />
+        <line x1="200" y1="488" x2="200" y2="530" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr-red)" />
+        <text x="310" y="480" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace"
+          font-size="9">TIDAK COCOK</text>
+        <rect x="120" y="530" width="160" height="48" rx="3" fill="rgba(239,68,68,0.08)" stroke="rgba(239,68,68,0.5)"
+          stroke-width="1" />
+        <text x="200" y="551" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace"
+          font-size="10">"TIDAK DIKENAL"</text>
+        <text x="200" y="567" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace"
+          font-size="9">playToneError · return</text>
+
+        <!-- right: cocok -->
+        <line x1="430" y1="488" x2="660" y2="488" stroke="#10b981" stroke-width="1.5" />
+        <line x1="660" y1="488" x2="660" y2="530" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr-green)" />
+        <text x="548" y="480" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace"
+          font-size="9">COCOK</text>
+        <rect x="580" y="530" width="160" height="48" rx="3" fill="rgba(16,185,129,0.08)" stroke="rgba(16,185,129,0.5)"
+          stroke-width="1" />
+        <text x="660" y="548" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace"
+          font-size="10">fpIDtoString(id)</text>
+        <text x="660" y="564" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">→
+          kirimPresensi("FP_00003")</text>
+      </svg>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ═══════════════════════════════════════════════════
+       DIAGRAM 4: SYNC QUEUE FLOW
+  ═══════════════════════════════════════════════════ -->
+    <div class="section">
+      <div class="section-label">04 — Alur Offline Queue & Sync ke API</div>
+
+      <svg class="flow-svg" viewBox="0 0 860 320" xmlns="http://www.w3.org/2000/svg">
+        <rect width="860" height="320" fill="#0a0c10" />
+        <rect width="860" height="320" fill="url(#grid)" />
+
+        <!-- saveToQueue box -->
+        <rect x="40" y="40" width="160" height="56" rx="3" fill="#141820" stroke="#1e2530" stroke-width="1" />
+        <text x="120" y="62" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace"
+          font-size="10">saveToQueue()</text>
+        <text x="120" y="78" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">rfid, timestamp</text>
+        <text x="120" y="92" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">device_id, unix_time</text>
+
+        <line x1="200" y1="68" x2="240" y2="68" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- SD Card -->
+        <rect x="240" y="40" width="140" height="56" rx="3" fill="rgba(245,158,11,0.06)" stroke="rgba(245,158,11,0.4)"
+          stroke-width="1" />
+        <text x="310" y="60" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace"
+          font-size="10">SD Card</text>
+        <text x="310" y="76" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">queue_0.csv</text>
+        <text x="310" y="90" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">max 25 baris/file</text>
+
+        <!-- full → next file -->
+        <line x1="310" y1="96" x2="310" y2="132" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3" />
+        <rect x="240" y="132" width="140" height="40" rx="3" fill="#0f1218" stroke="#1e2530" stroke-width="1" />
+        <text x="310" y="150" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">queue_1.csv …</text>
+        <text x="310" y="164" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="8">maks 2000 file</text>
+
+        <!-- chunkedSync trigger -->
+        <line x1="380" y1="68" x2="440" y2="68" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)" />
+        <text x="408" y="60" fill="#475569" font-family="JetBrains Mono,monospace" font-size="8">WiFi OK</text>
+        <text x="408" y="72" fill="#475569" font-family="JetBrains Mono,monospace" font-size="8">tiap 5 mnt</text>
+
+        <!-- chunkedSync -->
+        <rect x="440" y="40" width="160" height="56" rx="3" fill="rgba(124,58,237,0.08)" stroke="rgba(124,58,237,0.5)"
+          stroke-width="1" />
+        <text x="520" y="60" text-anchor="middle" fill="#a78bfa" font-family="JetBrains Mono,monospace"
+          font-size="10">chunkedSync()</text>
+        <text x="520" y="76" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">max 5 file/cycle</text>
+        <text x="520" y="90" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">max 15 detik/run</text>
+
+        <line x1="600" y1="68" x2="640" y2="68" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <!-- API -->
+        <rect x="640" y="40" width="180" height="56" rx="3" fill="rgba(0,212,255,0.06)" stroke="rgba(0,212,255,0.4)"
+          stroke-width="1" />
+        <text x="730" y="60" text-anchor="middle" fill="#00d4ff" font-family="JetBrains Mono,monospace"
+          font-size="10">POST /sync-bulk</text>
+        <text x="730" y="76" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">zedlabs.id/api</text>
+        <text x="730" y="90" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace"
+          font-size="9">X-API-KEY: token</text>
+
+        <!-- HTTP 200 → hapus file -->
+        <line x1="730" y1="96" x2="730" y2="140" stroke="#10b981" stroke-width="1.5" marker-end="url(#arr-green)" />
+        <text x="742" y="122" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="9">HTTP 200</text>
+        <rect x="640" y="140" width="180" height="36" rx="3" fill="rgba(16,185,129,0.08)" stroke="rgba(16,185,129,0.4)"
+          stroke-width="1" />
+        <text x="730" y="163" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace"
+          font-size="10">sd.remove(file) ✓</text>
+
+        <!-- HTTP fail → retry -->
+        <line x1="640" y1="68" x2="620" y2="68" stroke="none" />
+        <text x="580" y="130" fill="#ef4444" font-family="JetBrains Mono,monospace" font-size="9">HTTP ≠200 →
+          skip</text>
+        <text x="580" y="144" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="8">coba lagi 5 menit
+          berikutnya</text>
+
+        <!-- Offline info box -->
+        <rect x="40" y="220" width="780" height="72" rx="3" fill="#0f1218" stroke="#1e2530" stroke-width="1" />
+        <text x="60" y="244" fill="#475569" font-family="JetBrains Mono,monospace" font-size="10"
+          font-weight="600">Mekanisme Offline:</text>
+        <text x="60" y="264" fill="#475569" font-family="JetBrains Mono,monospace" font-size="10">Data tetap tersimpan
+          di SD card selama WiFi mati. Saat reconnect, chunkedSync() otomatis jalan.</text>
+        <text x="60" y="280" fill="#475569" font-family="JetBrains Mono,monospace" font-size="10">Data yang lebih dari
+          30 hari (MAX_OFFLINE_AGE) akan dilewati. Max 2000 file × 25 baris = 50.000 records offline.</text>
+      </svg>
+    </div>
+
+    <!-- LEGEND -->
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-box" style="background:rgba(124,58,237,0.3);border:1px solid #7c3aed;border-radius:20px;">
+        </div>
+        Terminal (START/END)
+      </div>
+      <div class="legend-item">
+        <div class="legend-box" style="background:#141820;border:1px solid #1e2530;"></div>
+        Proses
+      </div>
+      <div class="legend-item">
+        <div class="legend-box"
+          style="background:#141820;border:1px solid #f59e0b;transform:rotate(45deg);width:14px;height:14px;border-radius:1px;">
+        </div>
+        <span style="margin-left:8px">Keputusan (Decision)</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-box" style="background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.5);"></div>
+        RFID Path
+      </div>
+      <div class="legend-item">
+        <div class="legend-box" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.5);"></div>
+        Fingerprint Path
+      </div>
+      <div class="legend-item">
+        <div class="legend-box" style="background:rgba(124,58,237,0.1);border:1px solid rgba(124,58,237,0.5);"></div>
+        Fungsi Bersama
+      </div>
+      <div class="legend-item">
+        <div class="legend-box" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.5);"></div>
+        Error / Gagal
+      </div>
+    </div>
+
+  </div>
+</body>
+
+</html>
