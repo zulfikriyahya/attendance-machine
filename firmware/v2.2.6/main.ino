@@ -68,20 +68,20 @@
 #define GMT_OFFSET_SEC 25200L
 
 // NETWORK CONFIG
-const char WIFI_SSID[] PROGMEM = "ssid_wifi";
-const char WIFI_PASSWORD[] PROGMEM = "password";
-const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM = "SecretTokenAPI";
-const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
-const char NTP_SERVER_2[] PROGMEM = "time.google.com";
-const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
+const char WIFI_SSID[] PROGMEM     = "SSID_WIFI";
+const char WIFI_PASSWORD[] PROGMEM = "PasswordWifi";
+const char API_BASE_URL[] PROGMEM  = "https://zedlabs.id";
+const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
+const char NTP_SERVER_1[] PROGMEM  = "pool.ntp.org";
+const char NTP_SERVER_2[] PROGMEM  = "time.google.com";
+const char NTP_SERVER_3[] PROGMEM  = "id.pool.ntp.org";
 
 // RTC MEMORY
-RTC_DATA_ATTR time_t lastValidTime = 0;
-RTC_DATA_ATTR bool timeWasSynced = false;
+RTC_DATA_ATTR time_t lastValidTime  = 0;
+RTC_DATA_ATTR bool timeWasSynced    = false;
 RTC_DATA_ATTR unsigned long bootTime = 0;
-RTC_DATA_ATTR bool bootTimeSet = false;
-RTC_DATA_ATTR int currentQueueFile = 0;
+RTC_DATA_ATTR bool bootTimeSet      = false;
+RTC_DATA_ATTR int currentQueueFile  = 0;
 RTC_DATA_ATTR bool rtcQueueFileValid = false;
 
 // HARDWARE OBJECTS
@@ -130,19 +130,19 @@ struct SyncState
 
 // GLOBAL STATE
 Timers timers = {};
-DisplayState currentDisplay = {false, "00:00", 0, 0};
+DisplayState currentDisplay  = {false, "00:00", 0, 0};
 DisplayState previousDisplay = {false, "--:--", -1, -1};
 SyncState syncState = {0, false, 0};
 
-char lastUID[11] = "";
+char lastUID[11]  = "";
 char deviceId[20] = "";
-bool isOnline = false;
-bool sdCardAvailable = false;
-bool oledIsOn = true;
+bool isOnline          = false;
+bool sdCardAvailable   = false;
+bool oledIsOn          = true;
 
-int cachedPendingRecords = 0;
-bool pendingCacheDirty = true;
-int cachedQueueFileCount = 0;
+int cachedPendingRecords  = 0;
+bool pendingCacheDirty    = true;
+int cachedQueueFileCount  = 0;
 
 volatile bool sdBusy = false;
 
@@ -156,12 +156,7 @@ struct RfidFeedback
 RfidFeedback rfidFeedback = {false, 0, false};
 
 // RFID VALIDATION RESULT
-enum RfidValidResult
-{
-    RFID_VALID,
-    RFID_INVALID,
-    RFID_UNREACHABLE
-};
+enum RfidValidResult { RFID_VALID, RFID_INVALID, RFID_UNREACHABLE };
 
 // RECONNECT STATE MACHINE
 enum ReconnectState
@@ -198,33 +193,24 @@ void refreshPendingCache();
 void saveMetadata();
 void loadMetadata();
 RfidValidResult validateRfidOnline(const char *rfid);
-WiFiClientSecure &getSecureClient();
+WiFiClientSecure& getSecureClient();
 
 // ========================================
 // SD MUTEX
 // ========================================
-inline void acquireSD()
-{
-    while (sdBusy)
-        delay(5);
-    sdBusy = true;
-}
+inline void acquireSD() { while (sdBusy) delay(5); sdBusy = true; }
 inline void releaseSD() { sdBusy = false; }
 
 // ========================================
 // SPI CS
 // ========================================
-inline void selectSD()
-{
-    digitalWrite(PIN_RFID_SS, HIGH);
-    digitalWrite(PIN_SD_CS, LOW);
-}
+inline void selectSD()   { digitalWrite(PIN_RFID_SS, HIGH); digitalWrite(PIN_SD_CS, LOW); }
 inline void deselectSD() { digitalWrite(PIN_SD_CS, HIGH); }
 
 // ========================================
 // HTTPS CLIENT
 // ========================================
-WiFiClientSecure &getSecureClient()
+WiFiClientSecure& getSecureClient()
 {
     static WiFiClientSecure client;
     client.setInsecure();
@@ -236,8 +222,7 @@ WiFiClientSecure &getSecureClient()
 // ========================================
 void turnOffOLED()
 {
-    if (!oledIsOn)
-        return;
+    if (!oledIsOn) return;
     display.clearDisplay();
     display.display();
     display.ssd1306_command(SSD1306_DISPLAYOFF);
@@ -246,8 +231,7 @@ void turnOffOLED()
 
 void turnOnOLED()
 {
-    if (oledIsOn)
-        return;
+    if (oledIsOn) return;
     display.ssd1306_command(SSD1306_DISPLAYON);
     oledIsOn = true;
     memset(&previousDisplay, 0xFF, sizeof(previousDisplay));
@@ -256,17 +240,13 @@ void turnOnOLED()
 void checkOLEDSchedule()
 {
     unsigned long now = millis();
-    if (now - timers.lastOLEDScheduleCheck < OLED_SCHEDULE_CHECK_INTERVAL)
-        return;
+    if (now - timers.lastOLEDScheduleCheck < OLED_SCHEDULE_CHECK_INTERVAL) return;
     timers.lastOLEDScheduleCheck = now;
     struct tm timeInfo;
-    if (!getTimeWithFallback(&timeInfo))
-        return;
+    if (!getTimeWithFallback(&timeInfo)) return;
     int h = timeInfo.tm_hour;
-    if (h >= OLED_DIM_START_HOUR && h < OLED_DIM_END_HOUR)
-        turnOffOLED();
-    else
-        turnOnOLED();
+    if (h >= OLED_DIM_START_HOUR && h < OLED_DIM_END_HOUR) turnOffOLED();
+    else turnOnOLED();
 }
 
 // ========================================
@@ -275,22 +255,17 @@ void checkOLEDSchedule()
 bool isTimeValid()
 {
     struct tm timeInfo;
-    if (getLocalTime(&timeInfo) && timeInfo.tm_year >= 120)
-        return true;
-    if (!timeWasSynced || lastValidTime == 0 || !bootTimeSet)
-        return false;
+    if (getLocalTime(&timeInfo) && timeInfo.tm_year >= 120) return true;
+    if (!timeWasSynced || lastValidTime == 0 || !bootTimeSet) return false;
     return ((millis() - bootTime) / 1000) <= MAX_TIME_ESTIMATE_AGE;
 }
 
 bool getTimeWithFallback(struct tm *timeInfo)
 {
-    if (getLocalTime(timeInfo) && timeInfo->tm_year >= 120)
-        return true;
-    if (!timeWasSynced || lastValidTime == 0 || !bootTimeSet)
-        return false;
+    if (getLocalTime(timeInfo) && timeInfo->tm_year >= 120) return true;
+    if (!timeWasSynced || lastValidTime == 0 || !bootTimeSet) return false;
     unsigned long elapsed = (millis() - bootTime) / 1000;
-    if (elapsed > MAX_TIME_ESTIMATE_AGE)
-        return false;
+    if (elapsed > MAX_TIME_ESTIMATE_AGE) return false;
     time_t est = lastValidTime + elapsed;
     *timeInfo = *localtime(&est);
     return true;
@@ -299,11 +274,7 @@ bool getTimeWithFallback(struct tm *timeInfo)
 void getFormattedTimestamp(char *buf, size_t bufSize)
 {
     struct tm timeInfo;
-    if (!getTimeWithFallback(&timeInfo))
-    {
-        buf[0] = '\0';
-        return;
-    }
+    if (!getTimeWithFallback(&timeInfo)) { buf[0] = '\0'; return; }
     strftime(buf, bufSize, "%Y-%m-%d %H:%M:%S", &timeInfo);
 }
 
@@ -323,11 +294,7 @@ bool syncTimeWithFallback()
             {
                 lastValidTime = mktime(&timeInfo);
                 timeWasSynced = true;
-                if (!bootTimeSet)
-                {
-                    bootTime = millis();
-                    bootTimeSet = true;
-                }
+                if (!bootTimeSet) { bootTime = millis(); bootTimeSet = true; }
                 char buf[6];
                 snprintf(buf, sizeof(buf), "%02d:%02d", timeInfo.tm_hour, timeInfo.tm_min);
                 showOLED(F("WAKTU TERSYNC"), buf);
@@ -342,11 +309,9 @@ bool syncTimeWithFallback()
 
 void periodicTimeSync()
 {
-    if (millis() - timers.lastTimeSync < TIME_SYNC_INTERVAL)
-        return;
+    if (millis() - timers.lastTimeSync < TIME_SYNC_INTERVAL) return;
     timers.lastTimeSync = millis();
-    if (WiFi.status() == WL_CONNECTED)
-        syncTimeWithFallback();
+    if (WiFi.status() == WL_CONNECTED) syncTimeWithFallback();
 }
 
 // ========================================
@@ -354,8 +319,7 @@ void periodicTimeSync()
 // ========================================
 void saveMetadata()
 {
-    if (!sdCardAvailable)
-        return;
+    if (!sdCardAvailable) return;
     selectSD();
     if (file.open(METADATA_FILE, O_WRONLY | O_CREAT | O_TRUNC))
     {
@@ -370,19 +334,10 @@ void saveMetadata()
 
 void loadMetadata()
 {
-    if (!sdCardAvailable)
-        return;
+    if (!sdCardAvailable) return;
     selectSD();
-    if (!sd.exists(METADATA_FILE))
-    {
-        deselectSD();
-        return;
-    }
-    if (!file.open(METADATA_FILE, O_RDONLY))
-    {
-        deselectSD();
-        return;
-    }
+    if (!sd.exists(METADATA_FILE)) { deselectSD(); return; }
+    if (!file.open(METADATA_FILE, O_RDONLY)) { deselectSD(); return; }
     char line[32];
     if (file.fgets(line, sizeof(line)) > 0)
     {
@@ -391,9 +346,9 @@ void loadMetadata()
         {
             *comma = '\0';
             cachedPendingRecords = atoi(line);
-            currentQueueFile = atoi(comma + 1);
-            rtcQueueFileValid = true;
-            pendingCacheDirty = false;
+            currentQueueFile     = atoi(comma + 1);
+            rtcQueueFileValid    = true;
+            pendingCacheDirty    = false;
         }
     }
     file.close();
@@ -405,8 +360,7 @@ void loadMetadata()
 // ========================================
 bool reinitSDCard()
 {
-    if (file.isOpen())
-        file.close();
+    if (file.isOpen()) file.close();
     sd.end();
     delay(100);
     selectSD();
@@ -418,8 +372,7 @@ bool reinitSDCard()
 
 void checkSDHealth()
 {
-    if (millis() - timers.lastSDRedetect < SD_REDETECT_INTERVAL)
-        return;
+    if (millis() - timers.lastSDRedetect < SD_REDETECT_INTERVAL) return;
     timers.lastSDRedetect = millis();
 
     if (!sdCardAvailable)
@@ -429,7 +382,7 @@ void checkSDHealth()
         releaseSD();
         if (recovered)
         {
-            sdCardAvailable = true;
+            sdCardAvailable  = true;
             pendingCacheDirty = true;
             showOLED(F("SD CARD"), "TERBACA KEMBALI");
             playToneSuccess();
@@ -460,21 +413,14 @@ void getQueueFileName(int index, char *buf, size_t bufSize)
 
 int countRecordsInFile(const char *filename)
 {
-    if (!sdCardAvailable)
-        return 0;
+    if (!sdCardAvailable) return 0;
     selectSD();
-    if (!file.open(filename, O_RDONLY))
-    {
-        deselectSD();
-        return 0;
-    }
+    if (!file.open(filename, O_RDONLY)) { deselectSD(); return 0; }
     int count = 0;
     char line[128];
-    if (file.available())
-        file.fgets(line, sizeof(line));
+    if (file.available()) file.fgets(line, sizeof(line));
     while (file.fgets(line, sizeof(line)) > 0)
-        if (strlen(line) > 10)
-            count++;
+        if (strlen(line) > 10) count++;
     file.close();
     deselectSD();
     return count;
@@ -482,8 +428,7 @@ int countRecordsInFile(const char *filename)
 
 int countAllOfflineRecords()
 {
-    if (!sdCardAvailable)
-        return 0;
+    if (!sdCardAvailable) return 0;
     int total = 0;
     cachedQueueFileCount = 0;
     char filename[20];
@@ -492,17 +437,13 @@ int countAllOfflineRecords()
     {
         esp_task_wdt_reset();
         getQueueFileName(i, filename, sizeof(filename));
-        if (!sd.exists(filename))
-            continue;
+        if (!sd.exists(filename)) continue;
         cachedQueueFileCount++;
-        if (!file.open(filename, O_RDONLY))
-            continue;
+        if (!file.open(filename, O_RDONLY)) continue;
         char line[128];
-        if (file.available())
-            file.fgets(line, sizeof(line));
+        if (file.available()) file.fgets(line, sizeof(line));
         while (file.fgets(line, sizeof(line)) > 0)
-            if (strlen(line) > 10)
-                total++;
+            if (strlen(line) > 10) total++;
         file.close();
     }
     deselectSD();
@@ -511,10 +452,9 @@ int countAllOfflineRecords()
 
 void refreshPendingCache()
 {
-    if (!pendingCacheDirty)
-        return;
+    if (!pendingCacheDirty) return;
     cachedPendingRecords = countAllOfflineRecords();
-    pendingCacheDirty = false;
+    pendingCacheDirty    = false;
     saveMetadata();
 }
 
@@ -526,11 +466,7 @@ bool initSDCard()
     digitalWrite(PIN_RFID_SS, HIGH);
     selectSD();
     delay(10);
-    if (!sd.begin(PIN_SD_CS, SD_SCK_MHZ(10)))
-    {
-        deselectSD();
-        return false;
-    }
+    if (!sd.begin(PIN_SD_CS, SD_SCK_MHZ(10))) { deselectSD(); return false; }
 
     loadMetadata();
 
@@ -558,22 +494,15 @@ bool initSDCard()
                 if (file.open(filename, O_RDONLY))
                 {
                     char line[128];
-                    if (file.available())
-                        file.fgets(line, sizeof(line));
+                    if (file.available()) file.fgets(line, sizeof(line));
                     while (file.fgets(line, sizeof(line)) > 0)
-                        if (strlen(line) > 10)
-                            count++;
+                        if (strlen(line) > 10) count++;
                     file.close();
                 }
-                if (count < MAX_RECORDS_PER_FILE)
-                {
-                    currentQueueFile = i;
-                    break;
-                }
+                if (count < MAX_RECORDS_PER_FILE) { currentQueueFile = i; break; }
             }
         }
-        if (currentQueueFile == -1)
-            currentQueueFile = 0;
+        if (currentQueueFile == -1) currentQueueFile = 0;
         rtcQueueFileValid = true;
     }
 
@@ -593,19 +522,15 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
     {
         int fileIdx = (currentQueueFile - offset + MAX_QUEUE_FILES) % MAX_QUEUE_FILES;
         getQueueFileName(fileIdx, filename, sizeof(filename));
-        if (!sd.exists(filename))
-            continue;
-        if (!file.open(filename, O_RDONLY))
-            continue;
+        if (!sd.exists(filename)) continue;
+        if (!file.open(filename, O_RDONLY)) continue;
         char line[128];
-        if (file.available())
-            file.fgets(line, sizeof(line));
+        if (file.available()) file.fgets(line, sizeof(line));
         int linesRead = 0;
         while (file.fgets(line, sizeof(line)) > 0 && linesRead < MAX_DUPLICATE_CHECK_LINES)
         {
             int len = strlen(line);
-            while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-                line[--len] = '\0';
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
             char *c1 = strchr(line, ',');
             char *c3 = strrchr(line, ',');
             if (c1 && c3 && c3 > c1)
@@ -622,8 +547,7 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
             }
             linesRead++;
         }
-        if (file.isOpen())
-            file.close();
+        if (file.isOpen()) file.close();
     }
     return found;
 }
@@ -633,21 +557,18 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
 // ========================================
 bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime)
 {
-    if (!sdCardAvailable || sdBusy)
-        return false;
+    if (!sdCardAvailable || sdBusy) return false;
 
     acquireSD();
     selectSD();
 
     if (isDuplicateInternal(rfid, unixTime))
     {
-        deselectSD();
-        releaseSD();
+        deselectSD(); releaseSD();
         return false;
     }
 
-    if (currentQueueFile < 0 || currentQueueFile >= MAX_QUEUE_FILES)
-        currentQueueFile = 0;
+    if (currentQueueFile < 0 || currentQueueFile >= MAX_QUEUE_FILES) currentQueueFile = 0;
 
     char currentFile[20];
     getQueueFileName(currentQueueFile, currentFile, sizeof(currentFile));
@@ -665,11 +586,9 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
     if (file.open(currentFile, O_RDONLY))
     {
         char line[128];
-        if (file.available())
-            file.fgets(line, sizeof(line));
+        if (file.available()) file.fgets(line, sizeof(line));
         while (file.fgets(line, sizeof(line)) > 0)
-            if (strlen(line) > 10)
-                currentCount++;
+            if (strlen(line) > 10) currentCount++;
         file.close();
     }
 
@@ -685,8 +604,7 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
             int nextCount = countRecordsInFile(nextFilename);
             if (nextCount > 0)
             {
-                deselectSD();
-                releaseSD();
+                deselectSD(); releaseSD();
                 return false;
             }
             sd.remove(nextFilename);
@@ -696,8 +614,7 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
         getQueueFileName(currentQueueFile, currentFile, sizeof(currentFile));
         if (!file.open(currentFile, O_WRONLY | O_CREAT))
         {
-            deselectSD();
-            releaseSD();
+            deselectSD(); releaseSD();
             return false;
         }
         file.println("rfid,timestamp,device_id,unix_time");
@@ -706,8 +623,7 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 
     if (!file.open(currentFile, O_WRONLY | O_APPEND))
     {
-        deselectSD();
-        releaseSD();
+        deselectSD(); releaseSD();
         return false;
     }
 
@@ -735,18 +651,14 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
 // ========================================
 void appendFailedLog(const char *rfid, const char *timestamp, const char *reason)
 {
-    if (!sdCardAvailable)
-        return;
+    if (!sdCardAvailable) return;
     acquireSD();
     selectSD();
     if (file.open("/failed_log.csv", O_WRONLY | O_CREAT | O_APPEND))
     {
-        if (file.size() == 0)
-            file.println("rfid,timestamp,reason");
-        file.print(rfid);
-        file.print(",");
-        file.print(timestamp);
-        file.print(",");
+        if (file.size() == 0) file.println("rfid,timestamp,reason");
+        file.print(rfid); file.print(",");
+        file.print(timestamp); file.print(",");
         file.println(reason);
         file.sync();
         file.close();
@@ -760,8 +672,7 @@ void appendFailedLog(const char *rfid, const char *timestamp, const char *reason
 // ========================================
 RfidValidResult validateRfidOnline(const char *rfid)
 {
-    if (WiFi.status() != WL_CONNECTED)
-        return RFID_UNREACHABLE;
+    if (WiFi.status() != WL_CONNECTED) return RFID_UNREACHABLE;
 
     HTTPClient http;
     http.setTimeout(8000);
@@ -771,8 +682,7 @@ RfidValidResult validateRfidOnline(const char *rfid)
     strcpy_P(url, API_BASE_URL);
     strcat_P(url, PSTR("/api/presensi/validate"));
 
-    if (!http.begin(getSecureClient(), url))
-        return RFID_UNREACHABLE;
+    if (!http.begin(getSecureClient(), url)) return RFID_UNREACHABLE;
 
     http.addHeader(F("Content-Type"), F("application/json"));
     char apiKey[32];
@@ -785,10 +695,8 @@ RfidValidResult validateRfidOnline(const char *rfid)
     int code = http.POST(payload);
     http.end();
 
-    if (code == 200)
-        return RFID_VALID;
-    if (code == 404)
-        return RFID_INVALID;
+    if (code == 200) return RFID_VALID;
+    if (code == 404) return RFID_INVALID;
     return RFID_UNREACHABLE;
 }
 
@@ -797,51 +705,39 @@ RfidValidResult validateRfidOnline(const char *rfid)
 // ========================================
 bool readQueueFile(const char *filename, OfflineRecord *records, int *count, int maxCount)
 {
-    if (!sdCardAvailable)
-        return false;
+    if (!sdCardAvailable) return false;
     selectSD();
-    if (!file.open(filename, O_RDONLY))
-    {
-        deselectSD();
-        return false;
-    }
+    if (!file.open(filename, O_RDONLY)) { deselectSD(); return false; }
     *count = 0;
     time_t currentTime = time(nullptr);
     char line[128];
-    if (file.available())
-        file.fgets(line, sizeof(line));
+    if (file.available()) file.fgets(line, sizeof(line));
     while (file.available() && *count < maxCount)
     {
         if (file.fgets(line, sizeof(line)) > 0)
         {
             int len = strlen(line);
-            while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-                line[--len] = '\0';
-            if (len < 10)
-                continue;
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+            if (len < 10) continue;
 
             char *c1 = strchr(line, ',');
-            if (!c1)
-                continue;
+            if (!c1) continue;
             char *c2 = strchr(c1 + 1, ',');
-            if (!c2)
-                continue;
+            if (!c2) continue;
             char *c3 = strchr(c2 + 1, ',');
-            if (!c3)
-                continue;
+            if (!c3) continue;
 
             int rfidLen = c1 - line;
-            int tsLen = c2 - c1 - 1;
-            int devLen = c3 - c2 - 1;
+            int tsLen   = c2 - c1 - 1;
+            int devLen  = c3 - c2 - 1;
 
-            if (rfidLen <= 0 || tsLen <= 0)
-                continue;
+            if (rfidLen <= 0 || tsLen <= 0) continue;
 
-            strncpy(records[*count].rfid, line, min(rfidLen, 10));
+            strncpy(records[*count].rfid,      line,    min(rfidLen, 10));
             records[*count].rfid[min(rfidLen, 10)] = '\0';
             strncpy(records[*count].timestamp, c1 + 1, min(tsLen, 19));
             records[*count].timestamp[min(tsLen, 19)] = '\0';
-            strncpy(records[*count].deviceId, c2 + 1, min(devLen, 19));
+            strncpy(records[*count].deviceId,  c2 + 1, min(devLen, 19));
             records[*count].deviceId[min(devLen, 19)] = '\0';
             records[*count].unixTime = strtoul(c3 + 1, nullptr, 10);
 
@@ -858,19 +754,16 @@ bool readQueueFile(const char *filename, OfflineRecord *records, int *count, int
 
 bool syncQueueFile(const char *filename)
 {
-    if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
-        return false;
+    if (!sdCardAvailable || WiFi.status() != WL_CONNECTED) return false;
 
     OfflineRecord records[MAX_RECORDS_PER_FILE];
     int validCount = 0;
 
     if (!readQueueFile(filename, records, &validCount, MAX_RECORDS_PER_FILE) || validCount == 0)
     {
-        acquireSD();
-        selectSD();
+        acquireSD(); selectSD();
         sd.remove(filename);
-        deselectSD();
-        releaseSD();
+        deselectSD(); releaseSD();
         pendingCacheDirty = true;
         return true;
     }
@@ -882,8 +775,7 @@ bool syncQueueFile(const char *filename)
     char url[80];
     strcpy_P(url, API_BASE_URL);
     strcat_P(url, PSTR("/api/presensi/sync-bulk"));
-    if (!http.begin(getSecureClient(), url))
-        return false;
+    if (!http.begin(getSecureClient(), url)) return false;
 
     http.addHeader(F("Content-Type"), F("application/json"));
     char apiKey[32];
@@ -895,7 +787,7 @@ bool syncQueueFile(const char *filename)
     for (int i = 0; i < validCount; i++)
     {
         JsonObject obj = dataArray.createNestedObject();
-        obj["rfid"] = records[i].rfid;
+        obj["rfid"]      = records[i].rfid;
         obj["timestamp"] = records[i].timestamp;
         obj["device_id"] = records[i].deviceId;
         obj["sync_mode"] = true;
@@ -923,18 +815,16 @@ bool syncQueueFile(const char *filename)
                 if (strcmp(status, "error") == 0)
                 {
                     const char *rfid = item["rfid"] | "unknown";
-                    const char *ts = item["timestamp"] | "unknown";
-                    const char *msg = item["message"] | "UNKNOWN";
+                    const char *ts   = item["timestamp"] | "unknown";
+                    const char *msg  = item["message"] | "UNKNOWN";
                     appendFailedLog(rfid, ts, msg);
                 }
             }
         }
 
-        acquireSD();
-        selectSD();
+        acquireSD(); selectSD();
         sd.remove(filename);
-        deselectSD();
-        releaseSD();
+        deselectSD(); releaseSD();
         pendingCacheDirty = true;
         return true;
     }
@@ -952,9 +842,9 @@ void chunkedSync()
     }
     if (!syncState.inProgress)
     {
-        syncState.inProgress = true;
+        syncState.inProgress  = true;
         syncState.currentFile = 0;
-        syncState.startTime = millis();
+        syncState.startTime   = millis();
     }
 
     int filesSynced = 0;
@@ -965,32 +855,23 @@ void chunkedSync()
            millis() - syncState.startTime < MAX_SYNC_TIME)
     {
         getQueueFileName(syncState.currentFile, filename, sizeof(filename));
-        acquireSD();
-        selectSD();
+        acquireSD(); selectSD();
         bool exists = sd.exists(filename);
-        deselectSD();
-        releaseSD();
+        deselectSD(); releaseSD();
 
         if (exists)
         {
             int records = countRecordsInFile(filename);
             if (records > 0)
             {
-                if (syncQueueFile(filename))
-                    filesSynced++;
-                else if (WiFi.status() != WL_CONNECTED)
-                {
-                    syncState.inProgress = false;
-                    return;
-                }
+                if (syncQueueFile(filename)) filesSynced++;
+                else if (WiFi.status() != WL_CONNECTED) { syncState.inProgress = false; return; }
             }
             else
             {
-                acquireSD();
-                selectSD();
+                acquireSD(); selectSD();
                 sd.remove(filename);
-                deselectSD();
-                releaseSD();
+                deselectSD(); releaseSD();
                 pendingCacheDirty = true;
             }
         }
@@ -1001,7 +882,7 @@ void chunkedSync()
 
     if (syncState.currentFile >= MAX_QUEUE_FILES)
     {
-        syncState.inProgress = false;
+        syncState.inProgress  = false;
         syncState.currentFile = 0;
         if (filesSynced > 0)
         {
@@ -1047,8 +928,7 @@ bool connectToWiFi()
         display.println(ssid);
         display.setCursor(35, 30);
         display.print(F("CONNECTING"));
-        for (int j = 0; j < (retry % 4); j++)
-            display.print('.');
+        for (int j = 0; j < (retry % 4); j++) display.print('.');
         display.display();
         delay(300);
     }
@@ -1069,8 +949,7 @@ bool connectToWiFi()
 
 bool pingAPI()
 {
-    if (WiFi.status() != WL_CONNECTED)
-        return false;
+    if (WiFi.status() != WL_CONNECTED) return false;
     HTTPClient http;
     http.setTimeout(5000);
     http.setConnectTimeout(3000);
@@ -1105,7 +984,7 @@ void processReconnect()
         if (WiFi.status() != WL_CONNECTED && millis() - timers.lastReconnect >= RECONNECT_INTERVAL)
         {
             timers.lastReconnect = millis();
-            reconnectState = RECONNECT_INIT;
+            reconnectState       = RECONNECT_INIT;
         }
         break;
 
@@ -1121,14 +1000,12 @@ void processReconnect()
             WiFi.begin(s, p);
         }
         reconnectStartTime = millis();
-        reconnectState = RECONNECT_TRYING;
+        reconnectState     = RECONNECT_TRYING;
         break;
 
     case RECONNECT_TRYING:
-        if (WiFi.status() == WL_CONNECTED)
-            reconnectState = RECONNECT_SUCCESS;
-        else if (millis() - reconnectStartTime >= RECONNECT_TIMEOUT)
-            reconnectState = RECONNECT_FAILED;
+        if (WiFi.status() == WL_CONNECTED) reconnectState = RECONNECT_SUCCESS;
+        else if (millis() - reconnectStartTime >= RECONNECT_TIMEOUT) reconnectState = RECONNECT_FAILED;
         break;
 
     case RECONNECT_SUCCESS:
@@ -1142,9 +1019,9 @@ void processReconnect()
                 char buf[20];
                 snprintf(buf, sizeof(buf), "%d RECORDS", cachedPendingRecords);
                 showOLED(F("SYNCING"), buf);
-                syncState.inProgress = false;
+                syncState.inProgress  = false;
                 syncState.currentFile = 0;
-                timers.lastSync = millis();
+                timers.lastSync       = millis();
                 chunkedSync();
             }
         }
@@ -1152,7 +1029,7 @@ void processReconnect()
         break;
 
     case RECONNECT_FAILED:
-        isOnline = false;
+        isOnline       = false;
         reconnectState = RECONNECT_IDLE;
         break;
     }
@@ -1177,16 +1054,14 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
 
 bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
 {
-    if (WiFi.status() != WL_CONNECTED)
-        return false;
+    if (WiFi.status() != WL_CONNECTED) return false;
     HTTPClient http;
     http.setTimeout(10000);
     http.setConnectTimeout(5000);
     char url[80];
     strcpy_P(url, API_BASE_URL);
     strcat_P(url, PSTR("/api/presensi"));
-    if (!http.begin(getSecureClient(), url))
-        return false;
+    if (!http.begin(getSecureClient(), url)) return false;
     http.addHeader(F("Content-Type"), F("application/json"));
     char apiKey[32];
     strcpy_P(apiKey, API_SECRET_KEY);
@@ -1200,32 +1075,16 @@ bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
     int code = http.POST(payload);
     http.end();
 
-    if (code == 200)
-    {
-        strcpy(message, "PRESENSI OK");
-        return true;
-    }
-    if (code == 400)
-    {
-        strcpy(message, "CUKUP SEKALI!");
-        return false;
-    }
-    if (code == 404)
-    {
-        strcpy(message, "RFID UNKNOWN");
-        return false;
-    }
+    if (code == 200)  { strcpy(message, "PRESENSI OK");  return true; }
+    if (code == 400)  { strcpy(message, "CUKUP SEKALI!"); return false; }
+    if (code == 404)  { strcpy(message, "RFID UNKNOWN"); return false; }
     snprintf(message, 32, "SERVER ERR %d", code);
     return false;
 }
 
 bool kirimPresensi(const char *rfidUID, char *message)
 {
-    if (!isTimeValid())
-    {
-        strcpy(message, "WAKTU INVALID");
-        return false;
-    }
+    if (!isTimeValid()) { strcpy(message, "WAKTU INVALID"); return false; }
 
     char timestamp[20];
     getFormattedTimestamp(timestamp, sizeof(timestamp));
@@ -1233,27 +1092,15 @@ bool kirimPresensi(const char *rfidUID, char *message)
 
     if (sdCardAvailable)
     {
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            RfidValidResult valid = validateRfidOnline(rfidUID);
-            if (valid == RFID_INVALID)
-            {
-                strcpy(message, "RFID UNKNOWN");
-                return false;
-            }
-        }
-
         if (saveToQueue(rfidUID, timestamp, currentUnixTime))
         {
             strcpy(message, cachedQueueFileCount >= QUEUE_WARN_THRESHOLD ? "QUEUE HAMPIR PENUH!" : "DATA TERSIMPAN");
             return true;
         }
 
-        acquireSD();
-        selectSD();
+        acquireSD(); selectSD();
         bool dup = isDuplicateInternal(rfidUID, currentUnixTime);
-        deselectSD();
-        releaseSD();
+        deselectSD(); releaseSD();
 
         strcpy(message, dup ? "CUKUP SEKALI!" : "SD CARD ERROR");
         return false;
@@ -1271,13 +1118,11 @@ bool kirimPresensi(const char *rfidUID, char *message)
 // ========================================
 void showOLED(const __FlashStringHelper *line1, const char *line2)
 {
-    if (!oledIsOn)
-        return;
+    if (!oledIsOn) return;
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
-    int16_t x, y;
-    uint16_t w, h;
+    int16_t x, y; uint16_t w, h;
     display.getTextBounds(line1, 0, 0, &x, &y, &w, &h);
     display.setCursor((SCREEN_WIDTH - w) / 2, 10);
     display.println(line1);
@@ -1289,8 +1134,7 @@ void showOLED(const __FlashStringHelper *line1, const char *line2)
 
 void showOLED(const __FlashStringHelper *line1, const __FlashStringHelper *line2)
 {
-    if (!oledIsOn)
-        return;
+    if (!oledIsOn) return;
     char buf[32];
     strncpy_P(buf, (const char *)line2, 31);
     buf[31] = '\0';
@@ -1299,17 +1143,15 @@ void showOLED(const __FlashStringHelper *line1, const __FlashStringHelper *line2
 
 void showProgress(const __FlashStringHelper *message, int durationMs)
 {
-    if (!oledIsOn)
-        return;
-    const int progressStep = 8;
+    if (!oledIsOn) return;
+    const int progressStep  = 8;
     const int progressWidth = 80;
     int delayPerStep = durationMs / (progressWidth / progressStep);
     int startX = (SCREEN_WIDTH - progressWidth) / 2;
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
-    int16_t x, y;
-    uint16_t w, h;
+    int16_t x, y; uint16_t w, h;
     display.getTextBounds(message, 0, 0, &x, &y, &w, &h);
     display.setCursor((SCREEN_WIDTH - w) / 2, 20);
     display.println(message);
@@ -1327,15 +1169,15 @@ void showProgress(const __FlashStringHelper *message, int durationMs)
 
 void showStartupAnimation()
 {
-    static const char title[] = "ZEDLABS";
+    static const char title[]     = "ZEDLABS";
     static const char subtitle1[] = "INNOVATE BEYOND";
     static const char subtitle2[] = "LIMITS";
-    static const char version[] = "v2.2.6";
+    static const char version[]   = "v2.2.6";
 
-    const int titleX = (SCREEN_WIDTH - (7 * 12)) / 2;
-    const int sub1X = (SCREEN_WIDTH - 15 * 6) / 2;
-    const int sub2X = (SCREEN_WIDTH - 6 * 6) / 2;
-    const int verX = (SCREEN_WIDTH - 6 * 6) / 2;
+    const int titleX  = (SCREEN_WIDTH - (7 * 12)) / 2;
+    const int sub1X   = (SCREEN_WIDTH - 15 * 6) / 2;
+    const int sub2X   = (SCREEN_WIDTH - 6 * 6) / 2;
+    const int verX    = (SCREEN_WIDTH - 6 * 6) / 2;
 
     display.clearDisplay();
     display.setTextColor(WHITE);
@@ -1347,10 +1189,8 @@ void showStartupAnimation()
         display.setCursor(x, 5);
         display.println(title);
         display.setTextSize(1);
-        display.setCursor(sub1X, 30);
-        display.println(subtitle1);
-        display.setCursor(sub2X, 40);
-        display.println(subtitle2);
+        display.setCursor(sub1X, 30); display.println(subtitle1);
+        display.setCursor(sub2X, 40); display.println(subtitle2);
         display.display();
         delay(30);
     }
@@ -1360,12 +1200,7 @@ void showStartupAnimation()
     display.setCursor(verX, 55);
     display.print(version);
     display.display();
-    for (int i = 0; i < 3; i++)
-    {
-        delay(300);
-        display.print('.');
-        display.display();
-    }
+    for (int i = 0; i < 3; i++) { delay(300); display.print('.'); display.display(); }
     esp_task_wdt_reset();
     delay(500);
 }
@@ -1389,23 +1224,15 @@ void updateCurrentDisplayState()
     if (WiFi.status() == WL_CONNECTED)
     {
         long rssi = WiFi.RSSI();
-        currentDisplay.wifiSignal = (rssi > -67) ? 4 : (rssi > -70) ? 3
-                                                   : (rssi > -80)   ? 2
-                                                   : (rssi > -90)   ? 1
-                                                                    : 0;
+        currentDisplay.wifiSignal = (rssi > -67) ? 4 : (rssi > -70) ? 3 : (rssi > -80) ? 2 : (rssi > -90) ? 1 : 0;
     }
-    else
-    {
-        currentDisplay.wifiSignal = 0;
-    }
+    else { currentDisplay.wifiSignal = 0; }
 }
 
 void updateStandbySignal()
 {
-    if (!oledIsOn)
-        return;
-    if (!displayStateChanged())
-        return;
+    if (!oledIsOn) return;
+    if (!displayStateChanged()) return;
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
@@ -1414,14 +1241,12 @@ void updateStandbySignal()
     if (reconnectState == RECONNECT_INIT || reconnectState == RECONNECT_TRYING)
     {
         display.print(F("CONNECTING"));
-        for (int i = 0; i < (int)((millis() / 500) % 4); i++)
-            display.print('.');
+        for (int i = 0; i < (int)((millis() / 500) % 4); i++) display.print('.');
     }
     else if (syncState.inProgress)
     {
         display.print(F("SYNCING"));
-        for (int i = 0; i < (int)((millis() / 500) % 4); i++)
-            display.print('.');
+        for (int i = 0; i < (int)((millis() / 500) % 4); i++) display.print('.');
     }
     else
     {
@@ -1429,8 +1254,7 @@ void updateStandbySignal()
     }
 
     const char *tapText = "TAP KARTU";
-    int16_t x1, y1;
-    uint16_t w1, h1;
+    int16_t x1, y1; uint16_t w1, h1;
     display.getTextBounds(tapText, 0, 0, &x1, &y1, &w1, &h1);
     display.setCursor((SCREEN_WIDTH - w1) / 2, 20);
     display.print(tapText);
@@ -1454,10 +1278,8 @@ void updateStandbySignal()
         {
             int bh = 2 + i * 2;
             int bx = SCREEN_WIDTH - 18 + i * 5;
-            if (i < currentDisplay.wifiSignal)
-                display.fillRect(bx, 10 - bh, 3, bh, WHITE);
-            else
-                display.drawRect(bx, 10 - bh, 3, bh, WHITE);
+            if (i < currentDisplay.wifiSignal) display.fillRect(bx, 10 - bh, 3, bh, WHITE);
+            else display.drawRect(bx, 10 - bh, 3, bh, WHITE);
         }
     }
     display.display();
@@ -1469,36 +1291,19 @@ void updateStandbySignal()
 // ========================================
 void playToneSuccess()
 {
-    for (int i = 0; i < 2; i++)
-    {
-        tone(PIN_BUZZER, 3000, 100);
-        delay(150);
-    }
+    for (int i = 0; i < 2; i++) { tone(PIN_BUZZER, 3000, 100); delay(150); }
     noTone(PIN_BUZZER);
 }
 void playToneError()
 {
-    for (int i = 0; i < 3; i++)
-    {
-        tone(PIN_BUZZER, 3000, 150);
-        delay(200);
-    }
+    for (int i = 0; i < 3; i++) { tone(PIN_BUZZER, 3000, 150); delay(200); }
     noTone(PIN_BUZZER);
 }
-void playToneNotify()
-{
-    tone(PIN_BUZZER, 3000, 100);
-    delay(120);
-    noTone(PIN_BUZZER);
-}
+void playToneNotify() { tone(PIN_BUZZER, 3000, 100); delay(120); noTone(PIN_BUZZER); }
 void playStartupMelody()
 {
     static const int melody[] = {2500, 3000, 2500, 3000};
-    for (int i = 0; i < 4; i++)
-    {
-        tone(PIN_BUZZER, melody[i], 100);
-        delay(150);
-    }
+    for (int i = 0; i < 4; i++) { tone(PIN_BUZZER, melody[i], 100); delay(150); }
     noTone(PIN_BUZZER);
 }
 
@@ -1525,8 +1330,7 @@ void handleRFIDScan()
     timers.lastScan = millis();
 
     bool wasOff = !oledIsOn;
-    if (wasOff)
-        turnOnOLED();
+    if (wasOff) turnOnOLED();
 
     showOLED(F("RFID"), rfidBuffer);
     playToneNotify();
@@ -1537,8 +1341,8 @@ void handleRFIDScan()
     showOLED(success ? F("BERHASIL") : F("INFO"), message);
     success ? playToneSuccess() : playToneError();
 
-    rfidFeedback.active = true;
-    rfidFeedback.shownAt = millis();
+    rfidFeedback.active    = true;
+    rfidFeedback.shownAt   = millis();
     rfidFeedback.wasOledOff = wasOff;
 
     rfidReader.PICC_HaltA();
@@ -1554,7 +1358,8 @@ void setup()
     const esp_task_wdt_config_t wdtConfig = {
         .timeout_ms = WDT_TIMEOUT_SEC * 1000,
         .idle_core_mask = 0,
-        .trigger_panic = true};
+        .trigger_panic = true
+    };
     esp_task_wdt_init(&wdtConfig);
     esp_task_wdt_add(nullptr);
 
@@ -1569,8 +1374,7 @@ void setup()
     uint8_t mac[6];
     WiFi.macAddress(mac);
     snprintf(deviceId, sizeof(deviceId), "ESP32_%02X%02X", mac[4], mac[5]);
-    for (int i = 0; deviceId[i]; i++)
-        deviceId[i] = toupper(deviceId[i]);
+    for (int i = 0; deviceId[i]; i++) deviceId[i] = toupper(deviceId[i]);
 
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
@@ -1666,20 +1470,16 @@ void setup()
     showOLED(F("SISTEM SIAP"), isOnline ? "ONLINE" : "OFFLINE");
     playToneSuccess();
 
-    if (!bootTimeSet)
-    {
-        bootTime = millis();
-        bootTimeSet = true;
-    }
+    if (!bootTimeSet) { bootTime = millis(); bootTimeSet = true; }
 
-    unsigned long now = millis();
-    timers.lastSync = now;
-    timers.lastTimeSync = now;
-    timers.lastReconnect = now;
-    timers.lastDisplayUpdate = now;
-    timers.lastPeriodicCheck = now;
+    unsigned long now          = millis();
+    timers.lastSync            = now;
+    timers.lastTimeSync        = now;
+    timers.lastReconnect       = now;
+    timers.lastDisplayUpdate   = now;
+    timers.lastPeriodicCheck   = now;
     timers.lastOLEDScheduleCheck = now;
-    timers.lastSDRedetect = now;
+    timers.lastSDRedetect      = now;
 
     delay(1000);
     checkOLEDSchedule();
@@ -1697,8 +1497,7 @@ void loop()
     if (rfidFeedback.active && now - rfidFeedback.shownAt >= RFID_FEEDBACK_DISPLAY_MS)
     {
         rfidFeedback.active = false;
-        if (rfidFeedback.wasOledOff)
-            checkOLEDSchedule();
+        if (rfidFeedback.wasOledOff) checkOLEDSchedule();
         memset(&previousDisplay, 0xFF, sizeof(previousDisplay));
     }
 
@@ -1733,8 +1532,7 @@ void loop()
             {
                 refreshPendingCache();
                 timers.lastSync = now;
-                if (cachedPendingRecords > 0)
-                    chunkedSync();
+                if (cachedPendingRecords > 0) chunkedSync();
             }
         }
         periodicTimeSync();
@@ -1746,11 +1544,7 @@ void loop()
         int h = timeInfo.tm_hour;
         if (h >= SLEEP_START_HOUR || h < SLEEP_END_HOUR)
         {
-            if (syncState.inProgress)
-            {
-                chunkedSync();
-                return;
-            }
+            if (syncState.inProgress) { chunkedSync(); return; }
 
             showOLED(F("SLEEP MODE"), "...");
             delay(1000);
@@ -1761,10 +1555,8 @@ void loop()
             else
                 sleepSeconds = ((SLEEP_END_HOUR - h) * 3600) - (timeInfo.tm_min * 60 + timeInfo.tm_sec);
 
-            if (sleepSeconds < 60)
-                sleepSeconds = 60;
-            if (sleepSeconds > 43200)
-                sleepSeconds = 43200;
+            if (sleepSeconds < 60)    sleepSeconds = 60;
+            if (sleepSeconds > 43200) sleepSeconds = 43200;
 
             char buf[24];
             snprintf(buf, sizeof(buf), "%d Jam %d Menit", sleepSeconds / 3600, (sleepSeconds % 3600) / 60);

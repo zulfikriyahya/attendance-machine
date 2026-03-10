@@ -29,7 +29,7 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 
 1. **Identifikasi:** Pengguna memindai kartu RFID pada perangkat.
 2. **Validasi Lokal:** Perangkat melakukan verifikasi _debounce_ dan pengecekan duplikasi data dalam interval waktu tertentu (default: 30 menit) langsung pada penyimpanan lokal untuk mencegah input ganda. Pengecekan mencakup 3 file antrean terakhir untuk menutup celah di boundary file.
-3. **Manajemen Penyimpanan (Queue System):** Data masuk ke sistem antrean berkas CSV (`queue_X.csv`), dipecah menjadi berkas-berkas kecil (maksimal 25 rekaman per berkas) untuk menjaga stabilitas memori RAM mikrokontroler. Metadata antrean (jumlah record dan indeks file aktif) disimpan terpisah di `queue_meta.txt` untuk efisiensi akses.
+3. **Manajemen Penyimpanan (Queue System):** Data masuk ke sistem antrean berkas CSV (`queue_X.csv`), dipecah menjadi berkas-berkas kecil (maksimal 25 rekaman per berkas) untuk menjaga stabilitas memori RAM mikrokontroler. Metadata antrean (jumlah record dan indeks file aktif) disimpan terpisah di `queue_meta.txt` untuk efisiensi akses. Saat ada SD card, data **selalu** masuk ke queue terlebih dahulu tanpa validasi jaringan — validasi RFID dilakukan server saat proses sync bulk.
 4. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) memeriksa keberadaan berkas antrean. Jika koneksi internet tersedia, data dikirim secara _batch_ ke server **tanpa menampilkan proses atau mengganggu pengguna**. Berkas lokal dihapus secara otomatis hanya jika server memberikan respons sukses (HTTP 200).
 5. **Reconnect Otomatis (_Silent Auto-Reconnect_):** Jika WiFi terputus, sistem mencoba reconnect setiap 5 menit secara otomatis di latar belakang. Setelah kembali online, sistem otomatis melakukan sync data offline yang tertunda.
 6. **Manajemen OLED Cerdas:** Layar OLED otomatis mati pada jam tertentu untuk hemat daya dan memperpanjang umur display, namun tetap menyala sementara saat ada tapping kartu.
@@ -109,7 +109,7 @@ Sistem ini menggunakan arsitektur bus SPI bersama (_Shared SPI Bus_) untuk efisi
 - **Task Watchdog (WDT):** Pemulihan otomatis jika sistem hang lebih dari 60 detik, aktif selama operasi normal dan dinonaktifkan sebelum deep sleep.
 - **HTTPS Enforcement:** Semua komunikasi API menggunakan `WiFiClientSecure` untuk enkripsi transport layer.
 - **Non-Blocking RFID Feedback:** Feedback OLED pasca-tap tidak memblokir pembacaan kartu berikutnya — diimplementasikan via `RfidFeedback` struct tanpa `delay()`.
-- **Queue Overwrite Protection:** Rotasi file antrean tidak akan menimpa file yang belum ter-sync ke server.
+- **Queue-First Validation:** Saat ada SD card, data langsung masuk queue tanpa memanggil server. Validasi RFID dilakukan server saat proses sync bulk, sehingga tap kartu tidak pernah terhambat latensi jaringan.
 - **Metadata-Driven Cache:** Pending count dan indeks file aktif disimpan di `queue_meta.txt`, menghindari scan penuh 2000 file setiap boot.
 - **Heap Fragmentation Prevention:** Seluruh operasi string menggunakan `char[]` di stack, menggantikan Arduino `String` yang rawan fragmentasi heap pada operasi berulang.
 - **Single SSID Simplification:** Konfigurasi jaringan disederhanakan menjadi satu SSID dengan state machine reconnect 4 state.
@@ -249,13 +249,10 @@ Startup Animation
 ```
 RFID terbaca
     └─ Ada SD card?
-        ├─ Ya
-        │   ├─ Online → Validasi RFID ke server
-        │   │   ├─ Valid / Unreachable → Simpan ke queue SD
-        │   │   └─ Invalid → Tolak (RFID UNKNOWN)
-        │   └─ Offline → Simpan ke queue SD
+        ├─ Ya → Langsung simpan ke queue SD (tanpa validasi jaringan)
+        │       Server menolak RFID invalid saat sync → dicatat failed_log.csv
         └─ Tidak ada SD
-            ├─ Online → Kirim langsung ke API
+            ├─ Online → Validasi RFID → Kirim langsung ke API
             └─ Offline → Tolak (NO SD & WIFI)
 ```
 
