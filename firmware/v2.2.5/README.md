@@ -1,273 +1,343 @@
-# ATTENDANCE MACHINE
+# Sistem Presensi Pintar Berbasis IoT (Hybrid Edition)
 
-**MADRASAH UNIVERSE — Sistem Presensi Pintar berbasis RFID**
+**Attendance Machine** adalah solusi presensi cerdas berbasis _Internet of Things_ (IoT) yang dirancang untuk mengatasi tantangan infrastruktur jaringan yang tidak stabil. Dibangun di atas mikrokontroler ESP32-C3, sistem ini menerapkan arsitektur _Hybrid_ yang menggabungkan kemampuan pemrosesan daring (_online_) dan luring (_offline_) secara mulus.
 
-![Version](https://img.shields.io/badge/version-2.2.5-blue)
-![Platform](https://img.shields.io/badge/platform-ESP32--C3-orange)
-![IDE](https://img.shields.io/badge/IDE-Arduino%202.3.6-teal)
-![Author](https://img.shields.io/badge/author-Yahya%20Zulfikri-green)
+Sistem ini beroperasi dengan filosofi _Self-Healing_ dan _Store-and-Forward_, menjamin integritas data kehadiran tanpa kehilangan (_zero data loss_) melalui mekanisme antrean terpartisi (_Partitioned Queue System_), sinkronisasi otomatis, dan **operasi latar belakang yang tidak mengganggu pengguna** (_Non-Intrusive Background Operations_).
 
 ---
 
-## Deskripsi
+## Spesifikasi
 
-ATTENDANCE MACHINE adalah firmware untuk perangkat presensi berbasis RFID yang berjalan di atas ESP32-C3 Super Mini. Sistem mendukung mode **online** (langsung ke server API) dan **offline** (antrian ke SD Card), dengan sinkronisasi otomatis saat koneksi pulih. Dirancang untuk kebutuhan madrasah dengan pertimbangan jam operasional, deep sleep, dan toleransi jaringan yang tidak stabil.
-
----
-
-## Hardware
-
-| Komponen | Spesifikasi |
+| Field | Value |
 |---|---|
-| Mikrokontroler | ESP32-C3 Super Mini |
-| RFID Reader | MFRC522 (RC522) |
-| Display | OLED SSD1306 128×64 I2C |
-| Storage | MicroSD via SPI |
-| Buzzer | Pasif 3000 Hz |
-
-### Wiring / Pin Mapping
-
-| Pin GPIO | Fungsi |
-|---|---|
-| 1 | SD Card CS |
-| 3 | RFID RST |
-| 4 | SPI SCK |
-| 5 | SPI MISO |
-| 6 | SPI MOSI |
-| 7 | RFID SS |
-| 8 | OLED SDA |
-| 9 | OLED SCL |
-| 10 | Buzzer |
-
-> RFID dan SD Card berbagi bus SPI yang sama, dikelola dengan seleksi CS manual.
-
----
-
-## Fitur Utama
-
-- **Dual Mode Presensi** — Online langsung ke API, offline tersimpan di queue SD Card
-- **Queue System** — Hingga 2.000 file queue × 25 record per file (kapasitas ±50.000 record)
-- **Auto Sync** — Sinkronisasi otomatis saat koneksi WiFi pulih, dengan chunked sync non-blocking
-- **Duplicate Prevention** — Cek duplikat berbasis UID + unix timestamp dengan window 30 menit
-- **Time Fallback** — Estimasi waktu dari RTC memory jika NTP tidak tersedia (max 12 jam)
-- **Deep Sleep** — Otomatis tidur pukul 18.00–05.00 WIB untuk hemat daya
-- **OLED Schedule** — Layar mati otomatis pukul 08.00–14.00 WIB, nyala saat ada scan
-- **SD Hot-Detect** — Deteksi ulang SD Card yang terlepas setiap 30 detik
-- **Reconnect State Machine** — Percobaan ulang WiFi ke dua SSID secara non-blocking
-- **Failed Log** — Record yang gagal disync dicatat ke `/failed_log.csv`
+| Project | Madrasah Universe |
+| Author | Yahya Zulfikri |
+| Device | ESP32-C3 Super Mini |
+| Versi | 2.2.5 |
+| IDE | Arduino IDE v2.3.6 |
+| Dibuat | Juli 2025 |
+| Diperbarui | Maret 2026 |
 
 ---
 
 ## Arsitektur Sistem
 
+Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap status konektivitas dengan prioritas pada responsivitas dan user experience.
+
+### Mekanisme Operasional Utama
+
+1. **Identifikasi:** Pengguna memindai kartu RFID pada perangkat.
+2. **Validasi Lokal:** Perangkat melakukan verifikasi _debounce_ dan pengecekan duplikasi data dalam interval waktu tertentu (default: 30 menit) langsung pada penyimpanan lokal untuk mencegah input ganda.
+3. **Manajemen Penyimpanan (Queue System):** Data masuk ke sistem antrean berkas CSV (`queue_X.csv`), dipecah menjadi berkas-berkas kecil (maksimal 25 rekaman per berkas) untuk menjaga stabilitas memori RAM mikrokontroler.
+4. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) memeriksa keberadaan berkas antrean. Jika koneksi internet tersedia, data dikirim secara _batch_ ke server tanpa feedback visual. Berkas lokal dihapus secara otomatis hanya jika server memberikan respons sukses (HTTP 200).
+5. **Reconnect Otomatis (_Silent Auto-Reconnect_):** Jika WiFi terputus, sistem mencoba reconnect ke dua SSID secara bergantian setiap 5 menit. Setelah kembali online, sistem otomatis melakukan sync data offline yang tertunda.
+6. **Manajemen OLED Cerdas:** Layar OLED otomatis mati pada jam tertentu untuk hemat daya dan memperpanjang umur display, namun tetap menyala sementara saat ada tapping kartu.
+7. **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
+
+---
+
+## Spesifikasi Teknis
+
+### Perangkat Keras
+
+| Komponen             | Spesifikasi              | Fungsi Utama                                                               |
+| :------------------- | :----------------------- | :------------------------------------------------------------------------- |
+| **Unit Pemroses**    | ESP32-C3 Super Mini      | Manajemen logika utama, konektivitas WiFi, dan sistem berkas.              |
+| **Sensor Identitas** | RFID RC522 (13.56 MHz)   | Pembacaan UID kartu presensi (Protokol SPI).                               |
+| **Penyimpanan**      | Modul MicroSD (SPI)      | Penyimpanan antrean data offline (CSV) dan log sistem.                     |
+| **Antarmuka Visual** | OLED 0.96 inci (SSD1306) | Visualisasi status koneksi, jam, dan penghitung antrean (_Queue Counter_). |
+| **Indikator Audio**  | Buzzer Aktif 5V          | Umpan balik audio untuk status sukses, gagal, atau kesalahan sistem.       |
+| **Catu Daya**        | 5V USB / 3.7V Li-ion     | Sumber daya operasional.                                                   |
+
+### Pinout ESP32-C3
+
+| Komponen       | Pin Modul | Pin ESP32-C3 | Protokol | Catatan                        |
+| :------------- | :-------- | :----------- | :------- | :----------------------------- |
+| **Bus SPI**    | SCK       | GPIO 4       | SPI      | Jalur Clock (Shared)           |
+|                | MOSI      | GPIO 6       | SPI      | Jalur Data Master Out (Shared) |
+|                | MISO      | GPIO 5       | SPI      | Jalur Data Master In (Shared)  |
+| **RFID RC522** | SDA (SS)  | GPIO 7       | SPI      | Chip Select RFID               |
+|                | RST       | GPIO 3       | Digital  | Reset Hardware                 |
+| **SD Card**    | CS        | GPIO 1       | SPI      | Chip Select SD Card            |
+| **OLED**       | SDA       | GPIO 8       | I2C      | Data Display                   |
+|                | SCL       | GPIO 9       | I2C      | Clock Display                  |
+| **Buzzer**     | (+)       | GPIO 10      | PWM      | Indikator Audio                |
+
+---
+
+## Fitur Perangkat Lunak (Firmware)
+
+### Core Features
+
+- **Offline-First Capability:** Prioritas penyimpanan data lokal saat jaringan tidak tersedia atau tidak stabil.
+- **Partitioned Queue System:** Manajemen memori tingkat lanjut yang memecah penyimpanan data menjadi berkas-berkas kecil untuk mencegah _buffer overflow_.
+- **Smart Duplicate Prevention:** Algoritma _sliding window_ yang memindai 2 indeks antrean lokal terakhir untuk menolak pemindaian kartu yang sama dalam periode waktu yang dikonfigurasi (default: 30 menit).
+- **Bulk Upload Efficiency:** Mengirimkan himpunan data dalam satu permintaan HTTP POST.
+- **Hybrid Timekeeping:** Sinkronisasi waktu menggunakan NTP saat daring, dan estimasi waktu berbasis RTC internal saat luring.
+- **Deep Sleep Scheduling:** Manajemen daya otomatis di luar jam operasional (default: 18:00–05:00).
+- **Dual SSID Failover:** Mendukung dua konfigurasi WiFi sebagai primary dan fallback dengan state machine reconnect 7 state.
+
+### Advanced Features
+
+- **Silent Background Sync:** Sinkronisasi data berjalan di latar belakang tanpa feedback visual atau audio.
+- **Non-Intrusive Reconnect:** Auto-reconnect WiFi tanpa menampilkan loading screen.
+- **Smart Display Management:** OLED hanya menampilkan informasi penting (status, waktu, queue counter).
+- **Legacy Storage Support:** Dukungan SD Card lama (128MB–256MB) menggunakan pustaka SdFat.
+- **OLED Auto Dim:** Display mati otomatis pukul 08:00 dan nyala kembali pukul 14:00.
+- **Maximum TX Power (19.5 dBm):** Jangkauan sinyal WiFi lebih jauh dengan penetrasi lebih baik.
+- **Modem Sleep Mode:** Efisiensi daya tanpa mengorbankan responsivitas jaringan.
+
+---
+
+## Konfigurasi Sistem
+
+```cpp
+// Konfigurasi Jaringan
+const char WIFI_SSID_1[]     PROGMEM = "SSID_WIFI_1";
+const char WIFI_SSID_2[]     PROGMEM = "SSID_WIFI_2";
+const char WIFI_PASSWORD_1[] PROGMEM = "PasswordWifi1";
+const char WIFI_PASSWORD_2[] PROGMEM = "PasswordWifi2";
+const char API_BASE_URL[]    PROGMEM = "https://zedlabs.id";
+const char API_SECRET_KEY[]  PROGMEM = "SecretAPIToken";
+const long GMT_OFFSET_SEC    = 25200; // WIB (UTC+7)
+
+// Konfigurasi Antrean
+const int MAX_RECORDS_PER_FILE      = 25;
+const int MAX_QUEUE_FILES           = 2000;
+const unsigned long SYNC_INTERVAL   = 300000;   // 5 menit
+
+// Konfigurasi Validasi
+const unsigned long MIN_REPEAT_INTERVAL = 1800; // 30 menit
+
+// Konfigurasi Reconnect
+const unsigned long RECONNECT_INTERVAL  = 300000;  // 5 menit
+const unsigned long TIME_SYNC_INTERVAL  = 3600000; // 1 jam
+
+// Konfigurasi Sleep Mode
+const int SLEEP_START_HOUR = 18;
+const int SLEEP_END_HOUR   = 5;
+
+// Konfigurasi OLED Auto Dim
+const int OLED_DIM_START_HOUR = 8;
+const int OLED_DIM_END_HOUR   = 14;
 ```
-RFID Scan
+
+---
+
+## Mekanisme Antrean (Queue Logic)
+
+1. **Segmentasi:** Data disimpan dalam berkas kecil (`queue_N.csv`) berisi maksimal 25 baris.
+2. **Rotasi:** Saat berkas `queue_N` penuh, sistem membuat `queue_N+1`. File lama pada slot berikutnya dihapus dan ditimpa.
+3. **Sliding Window Duplicate Check:** Memeriksa 2 berkas antrean terakhir untuk menolak kartu yang sama dalam interval 30 menit.
+4. **Sinkronisasi Background:** Data dikirim secara batch ke server. Jika HTTP 200, berkas dihapus. Jika gagal, berkas dipertahankan untuk percobaan berikutnya.
+5. **Pending Count:** Dihitung dengan scan penuh seluruh SD card setiap kali cache dirty.
+
+---
+
+## Alur Operasi
+
+### Boot
+
+```
+Startup Animation
+    └─ Init SD Card
+        ├─ Ada SD  → tampil pending records
+        └─ Tidak ada SD → lanjut tanpa queue
+    └─ Connect WiFi (SSID1 → SSID2)
+        ├─ Berhasil → Ping API
+        │   ├─ API OK → Sync NTP → Bulk sync pending records
+        │   └─ API Gagal → Offline mode
+        └─ Gagal → Offline mode
+    └─ Init RFID
+    └─ Sistem Siap
+```
+
+### Saat Kartu Di-tap
+
+```
+RFID terbaca
+    └─ Feedback OLED + buzzer
+    └─ delay 1800ms (blocking)
+    └─ Ada SD card?
+        ├─ Ya
+        │   ├─ Online → Validasi RFID → Simpan ke queue SD
+        │   └─ Offline → Simpan ke queue SD
+        └─ Tidak ada SD
+            ├─ Online → Kirim langsung ke API
+            └─ Offline → Tolak (NO SD & WIFI)
+```
+
+### State Machine Reconnect
+
+```
+RECONNECT_IDLE
     │
     ▼
-kirimPresensi()
-    ├─ [Waktu invalid]      → Tolak, tampilkan "WAKTU INVALID"
-    ├─ [SD tersedia]
-    │      ├─ [Online]      → validateRfidOnline() → saveToQueue()
-    │      └─ [Offline]     → saveToQueue() langsung
-    └─ [SD tidak ada]
-           ├─ [Online]      → kirimLangsung() ke API
-           └─ [Offline]     → Tolak, tampilkan "NO SD & WIFI"
-```
-
-```
-Queue Sync Flow
+RECONNECT_INIT_SSID1 ──► WiFi.begin(SSID1)
     │
     ▼
-chunkedSync()
-    ├─ Baca hingga 5 file per siklus
-    ├─ Tiap file: readQueueFile() → HTTP POST bulk ke /api/presensi/sync-bulk
-    ├─ Response 200: hapus file, catat error item ke failed_log
-    └─ Berjalan non-blocking, dilanjutkan di loop berikutnya
+RECONNECT_TRYING_SSID1
+    ├── Connected ──► RECONNECT_SUCCESS
+    └── Timeout   ──► RECONNECT_INIT_SSID2 ──► WiFi.begin(SSID2)
+                            │
+                            ▼
+                      RECONNECT_TRYING_SSID2
+                            ├── Connected ──► RECONNECT_SUCCESS
+                            └── Timeout   ──► RECONNECT_FAILED ──► IDLE
 ```
 
 ---
 
-## Konfigurasi
+## OLED Auto Dim Schedule
 
-Edit konstanta berikut di bagian atas file sebelum upload:
-
-### Network
-
-```cpp
-const char WIFI_SSID_1[]     PROGMEM = "SSID_ANDA";
-const char WIFI_PASSWORD_1[] PROGMEM = "PASSWORD_ANDA";
-const char WIFI_SSID_2[]     PROGMEM = "SSID_BACKUP";
-const char WIFI_PASSWORD_2[] PROGMEM = "PASSWORD_BACKUP";
-const char API_BASE_URL[]    PROGMEM = "https://domain-anda.sch.id";
-const char API_SECRET_KEY[]  PROGMEM = "SECRET_KEY_ANDA";
-```
-
-### Jadwal Operasional
-
-```cpp
-#define SLEEP_START_HOUR    18   // Mulai deep sleep (jam)
-#define SLEEP_END_HOUR       5   // Bangun dari deep sleep (jam)
-#define OLED_DIM_START_HOUR  8   // Layar mati otomatis (jam)
-#define OLED_DIM_END_HOUR   14   // Layar hidup kembali (jam)
-#define GMT_OFFSET_SEC   25200L  // WIB = UTC+7
-```
-
-### Queue
-
-```cpp
-#define MAX_RECORDS_PER_FILE     25    // Record per file CSV
-#define MAX_QUEUE_FILES        2000    // Jumlah maksimal file antrian
-#define MAX_SYNC_FILES_PER_CYCLE  5    // File yang diproses tiap siklus sync
-#define QUEUE_WARN_THRESHOLD   1600    // Threshold warning queue hampir penuh
-```
+| Waktu         | Status OLED | Keterangan                        |
+| :------------ | :---------- | :-------------------------------- |
+| 00:00 – 07:59 | ON          | Display aktif untuk presensi pagi |
+| 08:00 – 13:59 | OFF         | Display mati untuk hemat daya     |
+| 14:00 – 17:59 | ON          | Display aktif untuk presensi sore |
+| 18:00 – 04:59 | SLEEP MODE  | Mesin deep sleep                  |
 
 ---
 
-## API Endpoints
+## API Specification
 
-| Method | Endpoint | Fungsi |
-|---|---|---|
-| GET | `/api/presensi/ping` | Health check server |
-| POST | `/api/presensi/validate` | Validasi RFID terdaftar |
-| POST | `/api/presensi` | Kirim presensi langsung |
-| POST | `/api/presensi/sync-bulk` | Sync batch dari queue |
+### Endpoint Health Check
+- **URL:** `/api/presensi/ping` — **Method:** `GET`
 
-Semua request menyertakan header `X-API-KEY`.
+### Endpoint Validasi RFID
+- **URL:** `/api/presensi/validate` — **Method:** `POST`
+- **Payload:** `{ "rfid": "0012345678" }`
+- **Respons:** HTTP 200 (valid), HTTP 404 (tidak dikenali).
 
-### Payload — Presensi Langsung
+### Endpoint Kirim Langsung
+- **URL:** `/api/presensi` — **Method:** `POST`
+- **Payload:**
+  ```json
+  {
+    "rfid": "0012345678",
+    "timestamp": "2026-03-10 07:30:00",
+    "device_id": "ESP32_A1B2",
+    "sync_mode": false
+  }
+  ```
 
-```json
-{
-  "rfid": "0012345678",
-  "timestamp": "2026-03-10 07:30:00",
-  "device_id": "ESP32_AABB",
-  "sync_mode": false
-}
-```
+### Endpoint Sinkronisasi Bulk
+- **URL:** `/api/presensi/sync-bulk` — **Method:** `POST`
+- **Payload:**
+  ```json
+  {
+    "data": [
+      {
+        "rfid": "0012345678",
+        "timestamp": "2026-03-10 07:30:00",
+        "device_id": "ESP32_A1B2",
+        "sync_mode": true
+      }
+    ]
+  }
+  ```
+- **Respons:** HTTP 200. Record dengan `status: error` dicatat ke `failed_log.csv`.
 
-### Payload — Sync Bulk
-
-```json
-{
-  "data": [
-    {
-      "rfid": "0012345678",
-      "timestamp": "2026-03-10 07:30:00",
-      "device_id": "ESP32_AABB",
-      "sync_mode": true
-    }
-  ]
-}
-```
-
-### Response Kode
-
-| HTTP Code | Makna |
-|---|---|
-| 200 | Berhasil |
-| 400 | Duplikat / sudah presensi hari ini |
-| 404 | RFID tidak terdaftar |
+Semua request menggunakan header `X-API-KEY`.
 
 ---
 
-## Format Data SD Card
+## Struktur File SD Card
 
-### Queue File (`/queue_N.csv`)
+```
+/
+├── queue_0.csv        ← File antrean aktif
+├── queue_1.csv
+├── ...
+├── queue_1999.csv
+└── failed_log.csv     ← Log record yang gagal disync
+```
 
+Format file antrean:
 ```
 rfid,timestamp,device_id,unix_time
-0012345678,2026-03-10 07:30:00,ESP32_AABB,1741577400
-```
-
-### Failed Log (`/failed_log.csv`)
-
-```
-rfid,timestamp,reason
-0012345678,2026-03-10 07:30:00,DUPLICATE
+0012345678,2026-03-10 07:30:00,ESP32_A1B2,1741571400
 ```
 
 ---
 
 ## Dependensi Library
 
-| Library | Fungsi |
+| Library | Versi yang diuji |
 |---|---|
-| `WiFi.h` | Koneksi WiFi ESP32 |
-| `HTTPClient.h` | HTTP request ke API |
-| `Wire.h` | I2C untuk OLED |
-| `SPI.h` | Bus SPI untuk RFID dan SD |
-| `MFRC522.h` | Driver RFID RC522 |
-| `Adafruit_SSD1306.h` | Driver OLED 128×64 |
-| `ArduinoJson.h` | Serialisasi JSON payload |
-| `SdFat.h` | Operasi file SD Card |
-| `time.h` | NTP dan manajemen waktu |
+| MFRC522 | ≥ 1.4.10 |
+| Adafruit SSD1306 | ≥ 2.5.7 |
+| Adafruit GFX Library | ≥ 1.11.9 |
+| ArduinoJson | ≥ 7.x |
+| SdFat | ≥ 2.2.x |
 
-Install semua library via **Arduino Library Manager** atau **PlatformIO**.
+Library bawaan ESP32 core: `WiFi`, `HTTPClient`, `Wire`, `SPI`, `time`.
 
 ---
 
-## Instalasi
+## Technical Specifications
 
-1. Buka project di Arduino IDE 2.3.6
-2. Pilih board: `ESP32C3 Dev Module`
-3. Sesuaikan konfigurasi network dan jadwal di bagian atas file
-4. Upload ke perangkat
-5. Monitor serial output untuk melihat status boot (opsional)
+### Queue System
 
----
+| Parameter             | Nilai           |
+| :-------------------- | :-------------- |
+| Max Records per File  | 25              |
+| Max Queue Files       | 2.000           |
+| Total Capacity        | 50.000 records  |
+| Duplicate Check Range | 2 file terakhir |
+| Sync Interval         | 300 detik       |
+| Duplicate Interval    | 1.800 detik     |
 
-## Alur Boot
+### WiFi Configuration
 
-```
-Power On
-    │
-    ├─ Startup animation + melody
-    ├─ Init SD Card → cek pending record
-    ├─ Connect WiFi (2 SSID, masing-masing hingga 6 detik)
-    ├─ Ping API (retry 3x)
-    ├─ Sync NTP time
-    ├─ Sync queue jika ada pending record
-    ├─ Init RFID (restart jika gagal)
-    └─ Loop utama
-```
+| Parameter          | Nilai                                        |
+| :----------------- | :------------------------------------------- |
+| SSID Support       | 2 (primary + fallback)                       |
+| TX Power           | 19.5 dBm                                     |
+| Sleep Mode         | WIFI_PS_MAX_MODEM                            |
+| Sort Method        | WIFI_CONNECT_AP_BY_SIGNAL                    |
+| Reconnect States   | 7 (IDLE, INIT_SSID1, TRYING_SSID1, INIT_SSID2, TRYING_SSID2, SUCCESS, FAILED) |
+| Reconnect Interval | 300 detik                                    |
 
----
+### Performance Metrics
 
-## Perilaku Saat Berbagai Kondisi
-
-| Kondisi | Perilaku |
-|---|---|
-| WiFi OK, SD OK | Validasi online → simpan ke queue → sync berkala |
-| WiFi OK, SD tidak ada | Kirim langsung ke API, tidak ada fallback storage |
-| WiFi putus, SD OK | Simpan ke queue, reconnect tiap 5 menit |
-| WiFi putus, SD tidak ada | Tolak semua scan, tampilkan "NO SD & WIFI" |
-| Waktu tidak valid | Tolak semua scan, tampilkan "WAKTU INVALID" |
-| Pukul 18.00–05.00 | Deep sleep, bangun otomatis sesuai hitungan waktu |
+| Metrik                  | Nilai         |
+| :---------------------- | :------------ |
+| Tap-to-Feedback Latency | ~1800ms (blocking feedback) |
+| Background Sync         | Setiap 5 menit |
+| Queue Capacity          | 50.000 records |
+| Power (Active)          | ~150mA        |
+| Power (Deep Sleep)      | < 5mA         |
 
 ---
 
-## Device ID
+## Known Limitations
 
-Device ID di-generate otomatis dari 2 byte terakhir MAC address saat pertama boot:
-
-```
-ESP32_XXYY  →  contoh: ESP32_A3F1
-```
-
----
-
-## Catatan Teknis
-
-- `RTC_DATA_ATTR` digunakan untuk mempertahankan `lastValidTime`, `bootTime`, dan `currentQueueFile` saat deep sleep
-- Estimasi waktu fallback maksimal 12 jam sejak sinkronisasi NTP terakhir
-- SPI CS dikelola manual: RFID dan SD tidak pernah aktif bersamaan
-- `sdBusy` flag mencegah akses SD yang tumpang tindih antara scan handler dan sync loop
+- **Blocking RFID feedback:** Setelah tap kartu, sistem menunggu 1800ms sebelum dapat membaca kartu berikutnya.
+- **Heap fragmentation:** Penggunaan Arduino `String` pada fungsi yang dipanggil berulang berpotensi menyebabkan fragmentasi heap pada operasi jangka panjang.
+- **Full SD scan:** Pending count dihitung dengan scan penuh hingga 2000 file setiap kali cache dirty, berpotensi lambat saat SD card memiliki banyak file.
+- **No watchdog:** Tidak ada mekanisme pemulihan otomatis jika sistem hang.
+- **HTTP only:** Komunikasi API tidak menggunakan enkripsi transport layer.
+- **Queue overwrite risk:** Rotasi file antrean dapat menimpa file yang belum ter-sync jika sync tertinggal jauh.
 
 ---
 
-## Author
+## Troubleshooting
 
-**Yahya Zulfikri** — ZEDLABS
-Project: MADRASAH UNIVERSE
-Device: MTs N 1 Pandeglang
-Version: 2.2.5 | Maret 2026
+**Masalah: WiFi sering disconnect**
+Pastikan RSSI di atas -70 dBm. Periksa interferensi pada frekuensi 2.4 GHz dan stabilitas power supply (minimal 5V 1A).
+
+**Masalah: OLED tidak mati/menyala sesuai jadwal**
+Pastikan waktu sistem sudah tersinkronisasi dengan NTP. Periksa nilai `OLED_DIM_START_HOUR` dan `OLED_DIM_END_HOUR`.
+
+**Masalah: Record tidak tersync meski online**
+Cek `failed_log.csv` di SD card untuk melihat alasan penolakan dari server.
+
+**Masalah: Device hang tanpa restart otomatis**
+v2.2.5 tidak memiliki watchdog. Cabut dan pasang kembali power supply, atau upgrade ke v2.2.6.
+
+---
+
+## Lisensi
+
+Hak Cipta 2025 Yahya Zulfikri. Kode sumber ini dilisensikan di bawah MIT License untuk penggunaan pendidikan dan pengembangan profesional.
