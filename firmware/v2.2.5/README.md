@@ -322,7 +322,22 @@ Library bawaan ESP32 core: `WiFi`, `HTTPClient`, `Wire`, `SPI`, `time`.
 
 ---
 
-## Troubleshooting
+## Struktur Repositori
+
+```text
+.
+├── firmware/
+│   ├── v1.0.0/     # Versi Awal (Online Only)
+│   ├── v2.0.0/     # Versi Hibrida Awal (Single CSV)
+│   ├── v2.1.0/     # Queue System Base
+│   ├── v2.2.0/     # Ultimate: SdFat, Legacy Card Support
+│   ├── v2.2.1/     # Auto-Reconnect & Bug Fixes
+│   ├── v2.2.2/     # Background Operations & Enhanced UX
+│   ├── v2.2.3/     # WiFi Signal Optimization
+│   ├── v2.2.4/     # OLED Auto Dim
+│   └── v2.2.5/     # Stability & Multi-SSID
+└── LICENSE
+```
 
 **Masalah: WiFi sering disconnect**
 Pastikan RSSI di atas -70 dBm. Periksa interferensi pada frekuensi 2.4 GHz dan stabilitas power supply (minimal 5V 1A).
