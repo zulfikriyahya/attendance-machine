@@ -75,13 +75,13 @@
 #define GMT_OFFSET_SEC 25200L
 
 // NETWORK CONFIG
-const char WIFI_SSID[] PROGMEM = "PRESENSI";
-const char WIFI_PASSWORD[] PROGMEM = "Pas$w0rd";
-const char API_BASE_URL[] PROGMEM = "https://presensi.mtsn1pandeglang.sch.id";
-const char API_SECRET_KEY[] PROGMEM = "P@ndegl@ng_14012000*";
-const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
-const char NTP_SERVER_2[] PROGMEM = "time.google.com";
-const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
+const char WIFI_SSID[] PROGMEM     = "SSID_WIFI";
+const char WIFI_PASSWORD[] PROGMEM = "PasswordWifi";
+const char API_BASE_URL[] PROGMEM  = "https://zedlabs.id";
+const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
+const char NTP_SERVER_1[] PROGMEM  = "pool.ntp.org";
+const char NTP_SERVER_2[] PROGMEM  = "time.google.com";
+const char NTP_SERVER_3[] PROGMEM  = "id.pool.ntp.org";
 
 // RTC MEMORY
 RTC_DATA_ATTR time_t lastValidTime = 0;
