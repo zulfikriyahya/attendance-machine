@@ -1,5 +1,4 @@
 # Sistem Presensi Pintar Berbasis IoT (Hybrid Edition)
-> Upgrade dari v2.2.5? Lihat bagian [Changelog v2.2.6](#riwayat-perubahan-changelog) untuk daftar lengkap perubahan.
 
 **Attendance Machine** adalah solusi presensi cerdas berbasis _Internet of Things_ (IoT) yang dirancang untuk mengatasi tantangan infrastruktur jaringan yang tidak stabil. Dibangun di atas mikrokontroler ESP32-C3, sistem ini menerapkan arsitektur _Hybrid_ yang menggabungkan kemampuan pemrosesan daring (_online_) dan luring (_offline_) secara mulus.
 
@@ -29,8 +28,9 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 
 1. **Identifikasi:** Pengguna memindai kartu RFID pada perangkat.
 2. **Validasi Lokal:** Perangkat melakukan verifikasi _debounce_ dan pengecekan duplikasi data dalam interval waktu tertentu (default: 30 menit) langsung pada penyimpanan lokal untuk mencegah input ganda. Pengecekan mencakup 3 file antrean terakhir untuk menutup celah di boundary file.
-3. **Manajemen Penyimpanan (Queue System):** Data masuk ke sistem antrean berkas CSV (`queue_X.csv`), dipecah menjadi berkas-berkas kecil (maksimal 25 rekaman per berkas) untuk menjaga stabilitas memori RAM mikrokontroler. Metadata antrean (jumlah record dan indeks file aktif) disimpan terpisah di `queue_meta.txt` untuk efisiensi akses. Saat ada SD card, data **selalu** masuk ke queue terlebih dahulu tanpa validasi jaringan — validasi RFID dilakukan server saat proses sync bulk.
-4. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) memeriksa keberadaan berkas antrean. Jika koneksi internet tersedia, data dikirim secara _batch_ ke server **tanpa menampilkan proses atau mengganggu pengguna**. Berkas lokal dihapus secara otomatis hanya jika server memberikan respons sukses (HTTP 200).
+3. **Manajemen Penyimpanan (Queue System):** Saat ada SD card, data selalu masuk ke antrean CSV (`queue_X.csv`) tanpa validasi jaringan. Validasi RFID dilakukan server saat sync bulk. Metadata antrean disimpan di `queue_meta.txt` untuk efisiensi akses.
+4. **NVS Buffer (Fallback Tanpa SD Card):** Saat SD card tidak tersedia, data disimpan sementara di flash internal ESP32 (NVS) dengan kapasitas 20 record. NVS disync ke server saat koneksi tersedia dan dihapus setelah berhasil.
+5. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) mengirim data secara _batch_ ke server tanpa feedback visual. NVS buffer disync terlebih dahulu sebelum queue SD card.
 5. **Reconnect Otomatis (_Silent Auto-Reconnect_):** Jika WiFi terputus, sistem mencoba reconnect setiap 5 menit secara otomatis di latar belakang. Setelah kembali online, sistem otomatis melakukan sync data offline yang tertunda.
 6. **Manajemen OLED Cerdas:** Layar OLED otomatis mati pada jam tertentu untuk hemat daya dan memperpanjang umur display, namun tetap menyala sementara saat ada tapping kartu.
 7. **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
@@ -504,6 +504,21 @@ Pastikan menggunakan ESP32 Arduino core v3.x. Core v2.x menggunakan API lama `es
 - **Struct Encapsulation:** Variabel global dikelompokkan dalam `struct Timers`, `struct SyncState`, `struct DisplayState`, `struct OfflineRecord`, dan `struct RfidFeedback`.
 - **pingAPI Timeout:** Dikurangi dari 10s/5s menjadi 5s/3s untuk boot yang lebih responsif.
 - **PROGMEM Local Variable Fix:** `showStartupAnimation()` menggunakan `static const char[]` yang benar untuk ESP32.
+
+### v2.2.7 (Maret 2026) — NVS Buffer, Single SSID, Reliability & Security
+- **NVS Buffer:** Penyimpanan fallback di flash internal ESP32 (20 record) untuk kondisi tanpa SD card. Persisten melewati restart dan deep sleep. Disync ke server sebelum queue SD.
+- **Zero Network Latency on Tap:** Validasi RFID online dihapus sepenuhnya dari alur tap. Kondisi ada SD langsung queue, kondisi tanpa SD langsung kirim atau fallback ke NVS — tidak ada panggilan jaringan yang memblokir tap.
+- **Non-Blocking RFID Feedback:** Feedback OLED pasca-tap tidak memblokir pembacaan kartu berikutnya via `RfidFeedback` struct.
+- **Queue Overwrite Protection:** Rotasi file antrean tidak menimpa file yang belum ter-sync.
+- **Enhanced Duplicate Check:** Cakupan diperluas dari 2 menjadi 3 file terakhir.
+- **Task Watchdog (WDT):** Pemulihan otomatis 60 detik dengan `esp_task_wdt_config_t` (kompatibel ESP32 core v3.x).
+- **HTTPS Enforcement:** Semua request API menggunakan `WiFiClientSecure`.
+- **Single SSID:** Disederhanakan dari 2 SSID menjadi 1 SSID dengan reconnect state machine 4 state.
+- **Metadata-Driven Queue Cache:** `queue_meta.txt` menyimpan pending count dan indeks file aktif.
+- **Heap Fragmentation Prevention:** Seluruh operasi string dimigrasi ke `char[]` di stack.
+- **DynamicJsonDocument:** Menggantikan `StaticJsonDocument<4096>` untuk menghindari stack pressure.
+- **Struct Encapsulation:** Variabel global dikelompokkan dalam `struct Timers`, `struct SyncState`, `struct DisplayState`, `struct OfflineRecord`, dan `struct RfidFeedback`.
+- **pingAPI Timeout:** Dikurangi dari 10s/5s menjadi 5s/3s.
 
 ### v2.2.5 (Maret 2026) — Stability & Multi-SSID
 - Dual SSID Failover: reconnect otomatis ke SSID sekunder jika SSID utama gagal, dengan state machine 7 state.
