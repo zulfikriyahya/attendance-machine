@@ -33,7 +33,7 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 5. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) mengirim data secara _batch_ ke server tanpa feedback visual. NVS buffer disync terlebih dahulu sebelum queue SD card.
 6. **Reconnect Otomatis (_Silent Auto-Reconnect_):** Jika WiFi terputus, sistem mencoba reconnect setiap 5 menit di latar belakang. Setelah kembali online, NVS buffer dan queue SD disync otomatis.
 7. **Manajemen OLED Cerdas:** Layar OLED otomatis mati pada jam tertentu untuk hemat daya, namun tetap menyala sementara saat ada tapping kartu.
-8. **OTA Update Otomatis:** Perangkat memeriksa ketersediaan firmware terbaru ke server setiap 24 jam. Jika tersedia, firmware diunduh dan di-flash secara otomatis tanpa intervensi manual.
+8. **OTA Update Otomatis:** Perangkat memeriksa ketersediaan firmware terbaru ke server setiap 3 jam. Jika tersedia, firmware diunduh dan di-flash secara otomatis tanpa intervensi manual.
 9. **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
 
 ---
@@ -83,12 +83,12 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 
 ### Advanced Features
 
-- **OTA Update Otomatis:** Perangkat memeriksa firmware terbaru ke server setiap 24 jam. Pemeriksaan pertama dilakukan langsung saat boot. Jika tersedia, firmware diunduh dan di-flash tanpa intervensi manual. WDT dinonaktifkan selama proses download untuk mencegah false timeout.
+- **OTA Update Otomatis:** Perangkat memeriksa firmware terbaru ke server setiap 3 jam. Pemeriksaan pertama dilakukan langsung saat boot (`lastOtaCheck = 0`). Jika tersedia, firmware diunduh dan di-flash tanpa intervensi manual. WDT dinonaktifkan selama proses download untuk mencegah false timeout.
 - **Silent Background Sync:** Sinkronisasi data berjalan di latar belakang tanpa feedback visual atau audio. NVS buffer disync sebelum queue SD.
 - **Non-Intrusive Reconnect:** Auto-reconnect WiFi tanpa menampilkan loading screen.
 - **Zero-Interruption UX:** Tap kartu tidak pernah terblokir oleh proses background maupun feedback OLED. OTA update hanya dieksekusi saat tidak ada tap aktif.
 - **Zero Network Latency on Tap:** Tidak ada panggilan jaringan saat tap — baik kondisi ada SD maupun kondisi tanpa SD dengan jaringan lambat/down.
-- **Task Watchdog (WDT):** Pemulihan otomatis 60 detik, dinonaktifkan sebelum deep sleep dan selama proses OTA download.
+- **Task Watchdog (WDT):** Pemulihan otomatis 60 detik. `esp_task_wdt_reset()` ditempatkan di setiap iterasi loop operasi panjang (scan file, baca baris, duplicate check) untuk mencegah false timeout. WDT dinonaktifkan sebelum deep sleep dan selama proses OTA download.
 - **HTTPS Enforcement:** Semua komunikasi API menggunakan `WiFiClientSecure`, termasuk endpoint OTA.
 - **Queue Overwrite Protection:** Rotasi file antrean tidak menimpa file yang belum ter-sync.
 - **Metadata-Driven Cache:** Pending count disimpan di `queue_meta.txt`, menghindari scan penuh 2000 file setiap boot.
@@ -126,7 +126,7 @@ const unsigned long TIME_SYNC_INTERVAL  = 3600000; // 1 jam
 
 // Konfigurasi OTA
 const char FIRMWARE_VERSION[]           = "2.2.8";
-const unsigned long OTA_CHECK_INTERVAL  = 86400000; // 24 jam
+const unsigned long OTA_CHECK_INTERVAL  = 10800000; // 3 jam
 
 // Konfigurasi Sleep Mode
 const int SLEEP_START_HOUR = 18;
@@ -147,7 +147,7 @@ const int WDT_TIMEOUT_SEC = 60;
 1. **Segmentasi:** Data disimpan dalam berkas kecil (`queue_N.csv`) berisi maksimal 25 baris.
 2. **Rotasi dengan Proteksi:** Saat berkas `queue_N` penuh, sistem membuat `queue_N+1`. Jika file target masih berisi record belum ter-sync, rotasi dibatalkan.
 3. **Metadata Cache:** Jumlah pending record dan indeks file aktif disimpan di `queue_meta.txt`. Count di-increment langsung saat `saveToQueue` berhasil.
-4. **Sliding Window Duplicate Check:** Memeriksa 3 berkas antrean terakhir untuk akurasi di boundary file.
+4. **Sliding Window Duplicate Check:** Memeriksa 3 berkas antrean terakhir untuk akurasi di boundary file. `esp_task_wdt_reset()` ditempatkan di setiap iterasi file dan baris untuk mencegah WDT timeout.
 5. **Sinkronisasi Background:** Data dikirim batch ke server tanpa feedback visual. Jika HTTP 200, berkas dihapus. Jika gagal, berkas dipertahankan.
 
 ## Mekanisme NVS Buffer
@@ -160,7 +160,7 @@ const int WDT_TIMEOUT_SEC = 60;
 
 ## Mekanisme OTA Update
 
-1. **Pemeriksaan:** Setiap 24 jam (dan langsung saat boot pertama), perangkat POST ke `/api/presensi/firmware/check` dengan versi firmware saat ini dan device ID.
+1. **Pemeriksaan:** Setiap 3 jam (dan langsung saat boot pertama), perangkat POST ke `/api/presensi/firmware/check` dengan versi firmware saat ini dan device ID.
 2. **Perbandingan Versi:** Server membandingkan versi menggunakan `version_compare`. Jika versi server lebih baru, response menyertakan URL download.
 3. **Notifikasi:** OLED menampilkan versi terbaru yang tersedia disertai bunyi notifikasi.
 4. **Eksekusi:** Update dieksekusi di iterasi loop berikutnya, hanya jika tidak ada tap RFID aktif (`!rfidFeedback.active`).
@@ -206,7 +206,7 @@ RFID terbaca
 ### OTA Update Flow
 
 ```
-Loop (setiap 24 jam / boot pertama)
+Loop (setiap 3 jam / boot pertama)
     └─ checkOtaUpdate()
         ├─ Tidak ada update → lanjut normal
         └─ Ada update → simpan ke otaState → tampil di OLED
@@ -377,7 +377,7 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 
 | Parameter            | Nilai                          |
 | :------------------- | :----------------------------- |
-| Check Interval       | 86.400 detik (24 jam)          |
+| Check Interval       | 10.800 detik (3 jam)           |
 | Check saat boot      | Ya (langsung, `lastOtaCheck=0`) |
 | Transport            | HTTPS                          |
 | WDT saat download    | Dinonaktifkan sementara        |
@@ -400,6 +400,7 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 | Parameter              | Nilai                    |
 | :--------------------- | :----------------------- |
 | Watchdog Timeout       | 60 detik                 |
+| WDT Reset Coverage     | Setiap iterasi loop operasi panjang (scan file, baca baris, duplicate check) |
 | RFID Feedback          | Non-blocking             |
 | String Handling        | Stack-based `char[]`     |
 | Transport Security     | HTTPS (WiFiClientSecure) |
@@ -423,7 +424,7 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 ## Troubleshooting
 
 **Masalah: Device restart saat boot setelah SD card terdeteksi**
-Kemungkinan WDT trigger selama scan file. Naikkan `WDT_TIMEOUT_SEC` sementara ke 120 untuk diagnosis.
+Kemungkinan WDT trigger selama scan file. Pastikan menggunakan firmware v2.2.8 yang sudah menyertakan `esp_task_wdt_reset()` di setiap iterasi loop operasi panjang. Jika masih terjadi, naikkan `WDT_TIMEOUT_SEC` sementara ke 120 untuk diagnosis.
 
 **Masalah: `esp_task_wdt_init` compilation error**
 Pastikan menggunakan ESP32 Arduino core v3.x.
@@ -456,9 +457,10 @@ Kemungkinan file `.bin` korup atau tidak kompatibel dengan ESP32-C3. Upload ulan
 ### v2.2.8 (Maret 2026)
 - Tambah fitur OTA Update otomatis via endpoint `/api/presensi/firmware/check` dan `/firmware/download/{filename}`
 - Tambah `OtaState` struct dan `lastOtaCheck` timer
-- Pemeriksaan OTA langsung saat boot (`lastOtaCheck = 0`)
+- Pemeriksaan OTA langsung saat boot (`lastOtaCheck = 0`) dan setiap 3 jam
 - WDT dinonaktifkan selama proses OTA download untuk mencegah false timeout
 - Eksekusi OTA hanya saat tidak ada tap aktif (`!rfidFeedback.active`)
+- Perbaikan WDT: tambah `esp_task_wdt_reset()` di setiap iterasi loop pada `countAllOfflineRecords`, `isDuplicateInternal`, `initSDCard`, `saveToQueue`, dan `readQueueFile` untuk mencegah false timeout saat operasi SD card
 - Perbaikan alur `kirimPresensi`: hapus pemanggilan `validateRfidOnline()` saat tanpa SD, langsung ke `kirimLangsung()` untuk mengurangi round-trip HTTP
 - Perbaikan urutan sync di `RECONNECT_SUCCESS`: NVS buffer disync sebelum SD queue
 

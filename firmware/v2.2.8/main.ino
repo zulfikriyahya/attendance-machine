@@ -95,13 +95,13 @@
 // ========================================
 // NETWORK CONFIG
 // ========================================
-const char WIFI_SSID[] PROGMEM      = "PRESENSI";
-const char WIFI_PASSWORD[] PROGMEM  = "P@ssw0rd";
-const char API_BASE_URL[] PROGMEM   = "https://presensi.mtsn1pandeglang.sch.id";
-const char API_SECRET_KEY[] PROGMEM = "P@ndegl@ng_14012000*";
-const char NTP_SERVER_1[] PROGMEM   = "pool.ntp.org";
-const char NTP_SERVER_2[] PROGMEM   = "time.google.com";
-const char NTP_SERVER_3[] PROGMEM   = "id.pool.ntp.org";
+const char WIFI_SSID[] PROGMEM = "SSID_WIFI";
+const char WIFI_PASSWORD[] PROGMEM = "PasswordWifi";
+const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
+const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
+const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
+const char NTP_SERVER_2[] PROGMEM = "time.google.com";
+const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
 
 // ========================================
 // RTC MEMORY
@@ -854,6 +854,8 @@ int countRecordsInFile(const char *filename)
     return count;
 }
 
+// [FIX WDT] Tambah esp_task_wdt_reset() di setiap iterasi loop
+// untuk mencegah WDT timeout saat memindai hingga 2000 file
 int countAllOfflineRecords()
 {
     if (!sdCardAvailable)
@@ -875,8 +877,11 @@ int countAllOfflineRecords()
         if (file.available())
             file.fgets(line, sizeof(line));
         while (file.fgets(line, sizeof(line)) > 0)
+        {
+            esp_task_wdt_reset();
             if (strlen(line) > 10)
                 total++;
+        }
         file.close();
     }
     deselectSD();
@@ -935,8 +940,11 @@ bool initSDCard()
                     if (file.available())
                         file.fgets(line, sizeof(line));
                     while (file.fgets(line, sizeof(line)) > 0)
+                    {
+                        esp_task_wdt_reset();
                         if (strlen(line) > 10)
                             count++;
+                    }
                     file.close();
                 }
                 if (count < MAX_RECORDS_PER_FILE)
@@ -958,6 +966,8 @@ bool initSDCard()
 // ========================================
 // DUPLICATE CHECK
 // ========================================
+// [FIX WDT] Tambah esp_task_wdt_reset() di setiap iterasi file
+// untuk mencegah WDT timeout saat membaca beberapa file sekaligus
 bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
 {
     bool found = false;
@@ -965,6 +975,7 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
     char filename[20];
     for (int offset = 0; offset < checkRange && !found; offset++)
     {
+        esp_task_wdt_reset();
         int fileIdx = (currentQueueFile - offset + MAX_QUEUE_FILES) % MAX_QUEUE_FILES;
         getQueueFileName(fileIdx, filename, sizeof(filename));
         if (!sd.exists(filename))
@@ -977,6 +988,7 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
         int linesRead = 0;
         while (file.fgets(line, sizeof(line)) > 0 && linesRead < MAX_DUPLICATE_CHECK_LINES)
         {
+            esp_task_wdt_reset();
             int len = strlen(line);
             while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
                 line[--len] = '\0';
@@ -1042,8 +1054,11 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
         if (file.available())
             file.fgets(line, sizeof(line));
         while (file.fgets(line, sizeof(line)) > 0)
+        {
+            esp_task_wdt_reset();
             if (strlen(line) > 10)
                 currentCount++;
+        }
         file.close();
     }
 
@@ -1185,6 +1200,7 @@ bool readQueueFile(const char *filename, OfflineRecord *records, int *count, int
         file.fgets(line, sizeof(line));
     while (file.available() && *count < maxCount)
     {
+        esp_task_wdt_reset();
         if (file.fgets(line, sizeof(line)) > 0)
         {
             int len = strlen(line);
