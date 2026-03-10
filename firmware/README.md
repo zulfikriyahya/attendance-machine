@@ -2,7 +2,7 @@
 
 **Attendance Machine** adalah solusi presensi cerdas berbasis _Internet of Things_ (IoT) yang dirancang untuk mengatasi tantangan infrastruktur jaringan yang tidak stabil. Dibangun di atas mikrokontroler ESP32-C3, sistem ini menerapkan arsitektur _Hybrid_ yang menggabungkan kemampuan pemrosesan daring (_online_) dan luring (_offline_) secara mulus.
 
-Sistem ini beroperasi dengan filosofi _Self-Healing_ dan _Store-and-Forward_, menjamin integritas data kehadiran tanpa kehilangan (_zero data loss_) melalui mekanisme antrean terpartisi (_Partitioned Queue System_), NVS buffer internal, sinkronisasi otomatis, dan **operasi latar belakang yang tidak mengganggu pengguna** (_Non-Intrusive Background Operations_).
+Sistem ini beroperasi dengan filosofi _Self-Healing_ dan _Store-and-Forward_, menjamin integritas data kehadiran tanpa kehilangan (_zero data loss_) melalui mekanisme antrean terpartisi (_Partitioned Queue System_), NVS buffer internal, sinkronisasi otomatis, **operasi latar belakang yang tidak mengganggu pengguna** (_Non-Intrusive Background Operations_), dan **pembaruan firmware jarak jauh otomatis** (_Over-The-Air Update_).
 
 ---
 
@@ -13,7 +13,7 @@ Sistem ini beroperasi dengan filosofi _Self-Healing_ dan _Store-and-Forward_, me
 | Project | Madrasah Universe |
 | Author | Yahya Zulfikri |
 | Device | ESP32-C3 Super Mini |
-| Versi | 2.2.7 |
+| Versi | 2.2.8 |
 | IDE | Arduino IDE v2.3.6 |
 | Dibuat | Juli 2025 |
 | Diperbarui | Maret 2026 |
@@ -33,7 +33,8 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 5. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) mengirim data secara _batch_ ke server tanpa feedback visual. NVS buffer disync terlebih dahulu sebelum queue SD card.
 6. **Reconnect Otomatis (_Silent Auto-Reconnect_):** Jika WiFi terputus, sistem mencoba reconnect setiap 5 menit di latar belakang. Setelah kembali online, NVS buffer dan queue SD disync otomatis.
 7. **Manajemen OLED Cerdas:** Layar OLED otomatis mati pada jam tertentu untuk hemat daya, namun tetap menyala sementara saat ada tapping kartu.
-8. **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
+8. **OTA Update Otomatis:** Perangkat memeriksa ketersediaan firmware terbaru ke server setiap 24 jam. Jika tersedia, firmware diunduh dan di-flash secara otomatis tanpa intervensi manual.
+9. **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
 
 ---
 
@@ -82,12 +83,13 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 
 ### Advanced Features
 
+- **OTA Update Otomatis:** Perangkat memeriksa firmware terbaru ke server setiap 24 jam. Pemeriksaan pertama dilakukan langsung saat boot. Jika tersedia, firmware diunduh dan di-flash tanpa intervensi manual. WDT dinonaktifkan selama proses download untuk mencegah false timeout.
 - **Silent Background Sync:** Sinkronisasi data berjalan di latar belakang tanpa feedback visual atau audio. NVS buffer disync sebelum queue SD.
 - **Non-Intrusive Reconnect:** Auto-reconnect WiFi tanpa menampilkan loading screen.
-- **Zero-Interruption UX:** Tap kartu tidak pernah terblokir oleh proses background maupun feedback OLED.
+- **Zero-Interruption UX:** Tap kartu tidak pernah terblokir oleh proses background maupun feedback OLED. OTA update hanya dieksekusi saat tidak ada tap aktif.
 - **Zero Network Latency on Tap:** Tidak ada panggilan jaringan saat tap — baik kondisi ada SD maupun kondisi tanpa SD dengan jaringan lambat/down.
-- **Task Watchdog (WDT):** Pemulihan otomatis 60 detik, dinonaktifkan sebelum deep sleep.
-- **HTTPS Enforcement:** Semua komunikasi API menggunakan `WiFiClientSecure`.
+- **Task Watchdog (WDT):** Pemulihan otomatis 60 detik, dinonaktifkan sebelum deep sleep dan selama proses OTA download.
+- **HTTPS Enforcement:** Semua komunikasi API menggunakan `WiFiClientSecure`, termasuk endpoint OTA.
 - **Queue Overwrite Protection:** Rotasi file antrean tidak menimpa file yang belum ter-sync.
 - **Metadata-Driven Cache:** Pending count disimpan di `queue_meta.txt`, menghindari scan penuh 2000 file setiap boot.
 - **Heap Fragmentation Prevention:** Seluruh operasi string menggunakan `char[]` di stack.
@@ -122,6 +124,10 @@ const unsigned long MIN_REPEAT_INTERVAL = 1800; // 30 menit
 const unsigned long RECONNECT_INTERVAL  = 300000;  // 5 menit
 const unsigned long TIME_SYNC_INTERVAL  = 3600000; // 1 jam
 
+// Konfigurasi OTA
+const char FIRMWARE_VERSION[]           = "2.2.8";
+const unsigned long OTA_CHECK_INTERVAL  = 86400000; // 24 jam
+
 // Konfigurasi Sleep Mode
 const int SLEEP_START_HOUR = 18;
 const int SLEEP_END_HOUR   = 5;
@@ -151,6 +157,15 @@ const int WDT_TIMEOUT_SEC = 60;
 3. **Prioritas Sync:** NVS buffer disync ke server sebelum queue SD card.
 4. **Full Buffer:** Jika NVS penuh dan server masih tidak dapat dihubungi, tap ditolak dengan pesan `BUFFER PENUH!`.
 5. **Pembersihan:** Semua record NVS dihapus setelah server merespons HTTP 200.
+
+## Mekanisme OTA Update
+
+1. **Pemeriksaan:** Setiap 24 jam (dan langsung saat boot pertama), perangkat POST ke `/api/presensi/firmware/check` dengan versi firmware saat ini dan device ID.
+2. **Perbandingan Versi:** Server membandingkan versi menggunakan `version_compare`. Jika versi server lebih baru, response menyertakan URL download.
+3. **Notifikasi:** OLED menampilkan versi terbaru yang tersedia disertai bunyi notifikasi.
+4. **Eksekusi:** Update dieksekusi di iterasi loop berikutnya, hanya jika tidak ada tap RFID aktif (`!rfidFeedback.active`).
+5. **Download & Flash:** WDT dinonaktifkan, firmware diunduh via HTTPS, dan di-flash ke partisi OTA.
+6. **Hasil:** Sukses → restart otomatis dengan firmware baru. Gagal → `otaState.updateAvailable` di-reset, perangkat lanjut beroperasi normal.
 
 ---
 
@@ -186,6 +201,19 @@ RFID terbaca
             └─ Offline → simpan ke NVS buffer
 
     Jika NVS penuh → tolak tap (BUFFER PENUH!)
+```
+
+### OTA Update Flow
+
+```
+Loop (setiap 24 jam / boot pertama)
+    └─ checkOtaUpdate()
+        ├─ Tidak ada update → lanjut normal
+        └─ Ada update → simpan ke otaState → tampil di OLED
+            └─ Loop berikutnya (jika !rfidFeedback.active)
+                └─ performOtaUpdate()
+                    ├─ Sukses → ESP.restart() → boot dengan firmware baru
+                    └─ Gagal  → reset otaState → lanjut normal
 ```
 
 ### State Machine Reconnect
@@ -252,6 +280,29 @@ RECONNECT_TRYING
   ```
 - **Respons:** HTTP 200. Record dengan `status: error` dicatat ke `failed_log.csv` (jika SD tersedia).
 
+### Endpoint OTA Check
+- **URL:** `/api/presensi/firmware/check` — **Method:** `POST`
+- **Payload:**
+  ```json
+  {
+    "version": "2.2.8",
+    "device_id": "ESP32_A1B2"
+  }
+  ```
+- **Respons:**
+  ```json
+  {
+    "update": true,
+    "version": "2.2.9",
+    "url": "https://zedlabs.id/api/presensi/firmware/download/v2.2.9.bin",
+    "changelog": "- Fitur baru\n- Perbaikan bug"
+  }
+  ```
+
+### Endpoint OTA Download
+- **URL:** `/api/presensi/firmware/download/{filename}` — **Method:** `GET`
+- **Respons:** Binary stream (`application/octet-stream`). Dilindungi oleh middleware `api.secret`.
+
 Semua request menggunakan header `X-API-KEY`.
 
 ---
@@ -292,7 +343,7 @@ _(pending_count, current_queue_file_index)_
 | ArduinoJson | ≥ 7.x |
 | SdFat | ≥ 2.2.x |
 
-Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSecure`, `HTTPClient`, `Wire`, `SPI`, `time`, `esp_task_wdt`, `Preferences`.
+Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSecure`, `HTTPClient`, `HTTPUpdate`, `Wire`, `SPI`, `time`, `esp_task_wdt`, `Preferences`.
 
 > **Catatan:** Gunakan ESP32 Arduino core v3.x. API `esp_task_wdt_init` pada core v3.x menggunakan struct `esp_task_wdt_config_t`.
 
@@ -321,6 +372,17 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 | Persistensi      | Melewati restart & deep sleep |
 | Perilaku penuh   | Tolak tap          |
 | Sync priority    | Sebelum SD queue   |
+
+### OTA Update
+
+| Parameter            | Nilai                          |
+| :------------------- | :----------------------------- |
+| Check Interval       | 86.400 detik (24 jam)          |
+| Check saat boot      | Ya (langsung, `lastOtaCheck=0`) |
+| Transport            | HTTPS                          |
+| WDT saat download    | Dinonaktifkan sementara        |
+| Kondisi eksekusi     | Tidak ada tap aktif            |
+| Perilaku gagal       | Reset state, lanjut normal     |
 
 ### WiFi Configuration
 
@@ -377,6 +439,34 @@ NVS buffer (20 record) penuh dan server belum bisa dihubungi. Pastikan koneksi W
 
 **Masalah: Record tidak tersync meski online**
 Cek `failed_log.csv` di SD card untuk melihat alasan penolakan dari server.
+
+**Masalah: OTA update tidak berjalan meski ada versi baru**
+Pastikan firmware aktif di panel Filament sudah di-toggle `is_active`. Cek juga koneksi WiFi dan header `X-API-KEY`. OTA hanya berjalan saat WiFi terhubung.
+
+**Masalah: OTA update gagal dengan error code**
+Error code ditampilkan di OLED (`ERR -xxx`). Kode ini berasal dari `httpUpdate.getLastError()`. Pastikan URL download dapat diakses dan file `.bin` tidak korup. Perangkat akan lanjut beroperasi normal setelah gagal.
+
+**Masalah: Device restart loop setelah OTA**
+Kemungkinan file `.bin` korup atau tidak kompatibel dengan ESP32-C3. Upload ulang firmware yang benar melalui panel Filament dan aktifkan kembali.
+
+---
+
+## Changelog
+
+### v2.2.8 (Maret 2026)
+- Tambah fitur OTA Update otomatis via endpoint `/api/presensi/firmware/check` dan `/firmware/download/{filename}`
+- Tambah `OtaState` struct dan `lastOtaCheck` timer
+- Pemeriksaan OTA langsung saat boot (`lastOtaCheck = 0`)
+- WDT dinonaktifkan selama proses OTA download untuk mencegah false timeout
+- Eksekusi OTA hanya saat tidak ada tap aktif (`!rfidFeedback.active`)
+- Perbaikan alur `kirimPresensi`: hapus pemanggilan `validateRfidOnline()` saat tanpa SD, langsung ke `kirimLangsung()` untuk mengurangi round-trip HTTP
+- Perbaikan urutan sync di `RECONNECT_SUCCESS`: NVS buffer disync sebelum SD queue
+
+### v2.2.7 (Maret 2026)
+- Rilis awal sistem hybrid dengan Queue System + NVS Buffer
+- Implementasi reconnect state machine 4 state
+- Deep sleep scheduling dan OLED auto dim
+- Bulk sync dengan chunked processing
 
 ---
 
