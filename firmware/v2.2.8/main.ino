@@ -23,6 +23,7 @@
 #include <SdFat.h>
 #include <esp_task_wdt.h>
 #include <Preferences.h>
+#include <Update.h>
 
 // ========================================
 // PIN DEFINITIONS
@@ -57,7 +58,7 @@
 #define SD_REDETECT_INTERVAL 30000UL
 #define MAX_TIME_ESTIMATE_AGE 43200UL
 #define WDT_TIMEOUT_SEC 60
-#define OTA_CHECK_INTERVAL 86400000UL
+#define OTA_CHECK_INTERVAL 10800000UL
 
 // ========================================
 // QUEUE CONFIG
@@ -94,13 +95,13 @@
 // ========================================
 // NETWORK CONFIG
 // ========================================
-const char WIFI_SSID[] PROGMEM = "SSID_WIFI";
-const char WIFI_PASSWORD[] PROGMEM = "PasswordWifi";
-const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
-const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
-const char NTP_SERVER_2[] PROGMEM = "time.google.com";
-const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
+const char WIFI_SSID[] PROGMEM      = "PRESENSI";
+const char WIFI_PASSWORD[] PROGMEM  = "P@ssw0rd";
+const char API_BASE_URL[] PROGMEM   = "https://presensi.mtsn1pandeglang.sch.id";
+const char API_SECRET_KEY[] PROGMEM = "P@ndegl@ng_14012000*";
+const char NTP_SERVER_1[] PROGMEM   = "pool.ntp.org";
+const char NTP_SERVER_2[] PROGMEM   = "time.google.com";
+const char NTP_SERVER_3[] PROGMEM   = "id.pool.ntp.org";
 
 // ========================================
 // RTC MEMORY
@@ -366,35 +367,73 @@ void performOtaUpdate()
     delay(500);
     showOLED(F("MENGUNDUH"), "MOHON TUNGGU...");
 
+    esp_task_wdt_delete(nullptr);
     esp_task_wdt_deinit();
 
-    httpUpdate.setLedPin(-1);
-    httpUpdate.rebootOnUpdate(false);
+    WiFiClientSecure otaClient;
+    otaClient.setInsecure();
 
-    t_httpUpdate_return ret = httpUpdate.update(getSecureClient(), otaState.url);
+    HTTPClient http;
+    http.begin(otaClient, otaState.url);
+    http.addHeader(F("X-API-KEY"), F("P@ndegl@ng_14012000*"));
+    http.setTimeout(60000);
 
-    switch (ret)
+    int code = http.GET();
+    if (code != 200)
     {
-    case HTTP_UPDATE_OK:
-        showOLED(F("UPDATE OK"), "RESTART...");
-        playToneSuccess();
-        delay(2000);
-        ESP.restart();
-        break;
-    case HTTP_UPDATE_FAILED:
-        snprintf(buf, sizeof(buf), "ERR %d", httpUpdate.getLastError());
+        snprintf(buf, sizeof(buf), "HTTP ERR %d", code);
         showOLED(F("UPDATE GAGAL"), buf);
         playToneError();
+        http.end();
         otaState.updateAvailable = false;
-        delay(2000);
-        break;
-    case HTTP_UPDATE_NO_UPDATES:
-        showOLED(F("UPDATE"), "TIDAK ADA");
-        otaState.updateAvailable = false;
-        delay(1500);
-        break;
+        goto reinit_wdt;
     }
 
+    {
+        int totalSize = http.getSize();
+        WiFiClient *stream = http.getStreamPtr();
+
+        if (!Update.begin(totalSize))
+        {
+            showOLED(F("UPDATE GAGAL"), "NO SPACE");
+            playToneError();
+            http.end();
+            otaState.updateAvailable = false;
+            goto reinit_wdt;
+        }
+
+        uint8_t buff[1024];
+        int written = 0;
+        while (http.connected() && written < totalSize)
+        {
+            size_t available = stream->available();
+            if (available)
+            {
+                int read = stream->readBytes(buff, min((size_t)sizeof(buff), available));
+                Update.write(buff, read);
+                written += read;
+            }
+            delay(1);
+        }
+        http.end();
+
+        if (Update.end() && Update.isFinished())
+        {
+            showOLED(F("UPDATE OK"), "RESTART...");
+            playToneSuccess();
+            delay(2000);
+            ESP.restart();
+        }
+        else
+        {
+            snprintf(buf, sizeof(buf), "ERR %d", Update.getError());
+            showOLED(F("UPDATE GAGAL"), buf);
+            playToneError();
+            otaState.updateAvailable = false;
+        }
+    }
+
+reinit_wdt:
     const esp_task_wdt_config_t wdtConfig = {
         .timeout_ms = WDT_TIMEOUT_SEC * 1000,
         .idle_core_mask = 0,
@@ -1561,7 +1600,6 @@ bool kirimPresensi(const char *rfidUID, char *message)
     getFormattedTimestamp(timestamp, sizeof(timestamp));
     time_t currentUnixTime = time(nullptr);
 
-    // Ada SD card — langsung queue, tanpa panggilan jaringan
     if (sdCardAvailable)
     {
         if (saveToQueue(rfidUID, timestamp, currentUnixTime))
@@ -1580,14 +1618,12 @@ bool kirimPresensi(const char *rfidUID, char *message)
         return false;
     }
 
-    // Tanpa SD card — coba kirim langsung ke server
     if (WiFi.status() == WL_CONNECTED)
     {
         bool sent = kirimLangsung(rfidUID, timestamp, message);
         if (sent)
             return true;
 
-        // Gagal kirim — fallback ke NVS buffer
         if (nvsIsDuplicate(rfidUID, currentUnixTime))
         {
             strcpy(message, "CUKUP SEKALI!");
@@ -1604,7 +1640,6 @@ bool kirimPresensi(const char *rfidUID, char *message)
         return false;
     }
 
-    // Tanpa SD, tanpa WiFi — simpan ke NVS buffer
     if (nvsIsDuplicate(rfidUID, currentUnixTime))
     {
         strcpy(message, "CUKUP SEKALI!");
