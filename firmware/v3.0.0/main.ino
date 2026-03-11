@@ -107,10 +107,10 @@
 // ========================================
 // NETWORK CONFIG
 // ========================================
-const char WIFI_SSID[] PROGMEM = "PRESENSI";
-const char WIFI_PASSWORD[] PROGMEM = "P@ssw0rd";
-const char API_BASE_URL[] PROGMEM = "https://presensi.mtsn1pandeglang.sch.id";
-const char API_SECRET_KEY[] PROGMEM = "P@ndegl@ng_14012000*";
+const char WIFI_SSID[] PROGMEM = "SSID_WIFI";
+const char WIFI_PASSWORD[] PROGMEM = "PasswordWifi";
+const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
+const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
 const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
 const char NTP_SERVER_2[] PROGMEM = "time.google.com";
 const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
@@ -346,7 +346,8 @@ void handleFingerprintScan()
     if (p != FINGERPRINT_OK)
     {
         bool wasOff = !oledIsOn;
-        if (wasOff) turnOnOLED();
+        if (wasOff)
+            turnOnOLED();
         showOLED(F("FINGERPRINT"), "COBA LAGI");
         playToneError();
         rfidFeedback.active = true;
@@ -359,7 +360,8 @@ void handleFingerprintScan()
     if (p == FINGERPRINT_NOTFOUND)
     {
         bool wasOff = !oledIsOn;
-        if (wasOff) turnOnOLED();
+        if (wasOff)
+            turnOnOLED();
         showOLED(F("FINGERPRINT"), "TIDAK DIKENAL");
         playToneError();
         rfidFeedback.active = true;
@@ -374,7 +376,8 @@ void handleFingerprintScan()
     fpIdToUid(finger.fingerID, fpUid);
 
     bool wasOff = !oledIsOn;
-    if (wasOff) turnOnOLED();
+    if (wasOff)
+        turnOnOLED();
     showOLED(F("FINGERPRINT"), fpUid);
     playToneNotify();
 
@@ -468,7 +471,7 @@ void performOtaUpdate()
 
     HTTPClient http;
     http.begin(otaClient, otaState.url);
-    http.addHeader(F("X-API-KEY"), F("P@ndegl@ng_14012000*"));
+    http.addHeader(F("X-API-KEY"), API_SECRET_KEY);
     http.setTimeout(60000);
 
     int code = http.GET();
