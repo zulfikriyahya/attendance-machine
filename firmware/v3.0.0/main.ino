@@ -1,13 +1,12 @@
 /*
  * ======================================================================================
- * SISTEM PRESENSI PINTAR (RFID) - QUEUE SYSTEM v3.0.0 (With OTA)
+ * SISTEM PRESENSI PINTAR (RFID + FINGERPRINT) - QUEUE SYSTEM v3.0.0
  * ======================================================================================
  * Device  : ESP32-C3 Super Mini
  * Author  : Yahya Zulfikri
  * Created : Juli 2025
  * Updated : Maret 2026
  * Version : 3.0.0
- * Add Feature Finger Print (Alternative RFID Card) => Fingerprint Sensor Module HLK-ZW101
  * ======================================================================================
  */
 
@@ -19,13 +18,13 @@
 #include <MFRC522.h>
 #include <SPI.h>
 #include <Adafruit_SSD1306.h>
-#include <Adafruit_Fingerprint.h>
 #include <ArduinoJson.h>
 #include <time.h>
 #include <SdFat.h>
 #include <esp_task_wdt.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <mbedtls/base64.h>
 
 // ========================================
 // PIN DEFINITIONS
@@ -39,9 +38,8 @@
 #define PIN_OLED_SDA 8
 #define PIN_OLED_SCL 9
 #define PIN_BUZZER 10
-#define PIN_FP_TX 20
-#define PIN_FP_RX 21
-#define PIN_FP_TOUCH 2
+#define PIN_FP_RX 20
+#define PIN_FP_TX 21
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
@@ -64,7 +62,6 @@
 #define MAX_TIME_ESTIMATE_AGE 43200UL
 #define WDT_TIMEOUT_SEC 60
 #define OTA_CHECK_INTERVAL 10800000UL
-#define FP_SCAN_TIMEOUT 3000UL
 
 // ========================================
 // QUEUE CONFIG
@@ -90,6 +87,11 @@
 #define FIRMWARE_VERSION "3.0.0"
 
 // ========================================
+// DEV MODE — hapus saat production
+// ========================================
+#define DEV_MODE
+
+// ========================================
 // SCHEDULE CONFIG
 // ========================================
 #define SLEEP_START_HOUR 18
@@ -101,16 +103,27 @@
 // ========================================
 // FINGERPRINT CONFIG
 // ========================================
-#define FP_ID_PREFIX "FP_"
-#define FP_UID_LEN 10
+#define FP_BAUD 57600
+#define FP_TIMEOUT_MS 3000
+#define FP_MATCH_THRESHOLD 50
+#define FP_TEMPLATE_SIZE 768
+#define FP_ENROLL_WAIT_MS 6000
+#define FINGER_DB_FILE "/finger_db.bin"
+#define FINGER_VER_FILE "/finger_ver.txt"
+// Record layout: [finger_id:10][rfid:10][len:2 big-endian][template:len]
+#define FP_RECORD_HEADER 22
 
 // ========================================
 // NETWORK CONFIG
 // ========================================
-const char WIFI_SSID[] PROGMEM = "SSID_WIFI";
-const char WIFI_PASSWORD[] PROGMEM = "PasswordWifi";
+const char WIFI_SSID[] PROGMEM = "PRESENSI";
+const char WIFI_PASSWORD[] PROGMEM = "password";
+#ifdef DEV_MODE
+const char API_BASE_URL[] PROGMEM = "http://10.242.22.72:8000";
+#else
 const char API_BASE_URL[] PROGMEM = "https://zedlabs.id";
-const char API_SECRET_KEY[] PROGMEM = "SecretAPIToken";
+#endif
+const char API_SECRET_KEY[] PROGMEM = "TokenAPI";
 const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
 const char NTP_SERVER_2[] PROGMEM = "time.google.com";
 const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
@@ -134,7 +147,6 @@ enum RfidValidResult
     RFID_INVALID,
     RFID_UNREACHABLE
 };
-
 enum ReconnectState
 {
     RECONNECT_IDLE,
@@ -159,7 +171,6 @@ struct Timers
     unsigned long lastSDRedetect;
     unsigned long lastNvsSync;
     unsigned long lastOtaCheck;
-    unsigned long lastFpScan;
 };
 
 struct DisplayState
@@ -207,8 +218,6 @@ MFRC522 rfidReader(PIN_RFID_SS, PIN_RFID_RST);
 SdFat sd;
 FsFile file;
 Preferences prefs;
-HardwareSerial fpSerial(1);
-Adafruit_Fingerprint finger(&fpSerial);
 
 // ========================================
 // GLOBAL STATE
@@ -225,12 +234,9 @@ char deviceId[20] = "";
 bool isOnline = false;
 bool sdCardAvailable = false;
 bool oledIsOn = true;
-bool fpAvailable = false;
-
 int cachedPendingRecords = 0;
 bool pendingCacheDirty = true;
 int cachedQueueFileCount = 0;
-
 volatile bool sdBusy = false;
 ReconnectState reconnectState = RECONNECT_IDLE;
 unsigned long reconnectStartTime = 0;
@@ -248,7 +254,8 @@ void playStartupMelody();
 void offlineBootFallback();
 void handleRFIDScan();
 void handleFingerprintScan();
-void processPresensi(const char *uid);
+void handleEnrollment(const char *rfidUID);
+bool syncFingerDB();
 void updateCurrentDisplayState();
 void updateStandbySignal();
 void checkOLEDSchedule();
@@ -263,7 +270,11 @@ void saveMetadata();
 void loadMetadata();
 void appendFailedLog(const char *rfid, const char *timestamp, const char *reason);
 RfidValidResult validateRfidOnline(const char *rfid);
+#ifdef DEV_MODE
+WiFiClient &getSecureClient();
+#else
 WiFiClientSecure &getSecureClient();
+#endif
 int nvsGetCount();
 void nvsSetCount(int count);
 bool nvsLoadRecord(int index, OfflineRecord &rec);
@@ -274,8 +285,6 @@ bool nvsSyncToServer();
 bool nvsIsDuplicate(const char *rfid, unsigned long unixTime);
 void checkOtaUpdate();
 void performOtaUpdate();
-bool initFingerprint();
-void fpIdToUid(uint16_t id, char *buf);
 
 // ========================================
 // SD MUTEX
@@ -301,87 +310,736 @@ inline void deselectSD() { digitalWrite(PIN_SD_CS, HIGH); }
 // ========================================
 // HTTPS CLIENT
 // ========================================
+#ifdef DEV_MODE
+WiFiClient &getSecureClient()
+{
+    static WiFiClient client;
+    return client;
+}
+#else
 WiFiClientSecure &getSecureClient()
 {
     static WiFiClientSecure client;
     client.setInsecure();
     return client;
 }
+#endif
 
 // ========================================
-// FINGERPRINT
+// ZW101 LOW-LEVEL
 // ========================================
-bool initFingerprint()
+static void zw101Flush()
 {
-    fpSerial.begin(57600, SERIAL_8N1, PIN_FP_RX, PIN_FP_TX);
-    delay(100);
-    finger.begin(57600);
-    if (!finger.verifyPassword())
+    while (Serial1.available())
+        Serial1.read();
+}
+
+static void zw101Send(uint8_t pid, const uint8_t *data, uint16_t dlen)
+{
+    uint8_t hdr[9];
+    hdr[0] = 0xEF;
+    hdr[1] = 0x01;
+    hdr[2] = hdr[3] = hdr[4] = hdr[5] = 0xFF;
+    hdr[6] = pid;
+    uint16_t plen = dlen + 2;
+    hdr[7] = plen >> 8;
+    hdr[8] = plen & 0xFF;
+
+    uint16_t cs = pid + hdr[7] + hdr[8];
+    for (uint16_t i = 0; i < dlen; i++)
+        cs += data[i];
+
+    Serial1.write(hdr, 9);
+    Serial1.write(data, dlen);
+    Serial1.write((uint8_t)(cs >> 8));
+    Serial1.write((uint8_t)(cs & 0xFF));
+    Serial1.flush();
+}
+
+static int zw101Read(uint8_t *buf, int maxLen, uint32_t timeout = FP_TIMEOUT_MS)
+{
+    int n = 0;
+    unsigned long t = millis();
+    while (millis() - t < timeout && n < maxLen)
+    {
+        if (Serial1.available())
+            buf[n++] = Serial1.read();
+        else
+            delay(2);
+    }
+    return n;
+}
+
+static uint8_t zw101Cmd(const uint8_t *payload, uint8_t plen)
+{
+    zw101Flush();
+    zw101Send(0x01, payload, plen);
+    uint8_t buf[16];
+    int n = zw101Read(buf, 16);
+    if (n < 10 || buf[0] != 0xEF || buf[1] != 0x01)
+        return 0xFF;
+    return buf[9];
+}
+
+static bool zw101GenImg()
+{
+    const uint8_t c[] = {0x01};
+    return zw101Cmd(c, 1) == 0x00;
+}
+
+static bool zw101Img2Tz(uint8_t slot)
+{
+    const uint8_t c[] = {0x02, slot};
+    return zw101Cmd(c, 2) == 0x00;
+}
+
+static bool zw101CreateModel()
+{
+    const uint8_t c[] = {0x05};
+    return zw101Cmd(c, 1) == 0x00;
+}
+
+static uint16_t zw101Match()
+{
+    zw101Flush();
+    const uint8_t c[] = {0x03};
+    zw101Send(0x01, c, 1);
+    uint8_t buf[16];
+    int n = zw101Read(buf, 16);
+    if (n < 12 || buf[9] != 0x00)
+        return 0;
+    return ((uint16_t)buf[10] << 8) | buf[11];
+}
+
+static int zw101UploadChar(uint8_t *out, int maxLen)
+{
+    zw101Flush();
+    const uint8_t c[] = {0x08, 0x01};
+    zw101Send(0x01, c, 2);
+
+    int total = 0;
+    unsigned long t = millis();
+    bool done = false;
+
+    while (!done && millis() - t < 8000)
+    {
+        uint8_t pkt[600];
+        int plen = 0;
+        while (plen < 9 && millis() - t < 8000)
+        {
+            if (Serial1.available())
+                pkt[plen++] = Serial1.read();
+            else
+                delay(1);
+        }
+        if (plen < 9)
+            break;
+
+        uint8_t pid = pkt[6];
+        uint16_t dlen = ((uint16_t)pkt[7] << 8) | pkt[8];
+        if (dlen < 2 || dlen > 550)
+            break;
+        uint16_t dataBytes = dlen - 2;
+
+        while ((int)plen < 9 + dataBytes + 2 && millis() - t < 8000)
+        {
+            if (Serial1.available())
+                pkt[plen++] = Serial1.read();
+            else
+                delay(1);
+        }
+        if (total + dataBytes <= maxLen)
+        {
+            memcpy(out + total, pkt + 9, dataBytes);
+            total += dataBytes;
+        }
+        if (pid == 0x08)
+            done = true;
+        esp_task_wdt_reset();
+    }
+    return done ? total : -1;
+}
+
+static bool zw101DownloadChar(const uint8_t *data, int len)
+{
+    zw101Flush();
+    const uint8_t c[] = {0x09, 0x02};
+    zw101Send(0x01, c, 2);
+
+    uint8_t ack[12];
+    unsigned long t = millis();
+    int n = 0;
+    while (millis() - t < 2000 && n < 12)
+    {
+        if (Serial1.available())
+            ack[n++] = Serial1.read();
+        else
+            delay(2);
+    }
+    if (n < 10 || ack[9] != 0x00)
         return false;
-    finger.getParameters();
+
+    int offset = 0;
+    while (offset < len)
+    {
+        int chunk = min(128, len - offset);
+        bool last = (offset + chunk >= len);
+        zw101Send(last ? 0x08 : 0x02, data + offset, chunk);
+        offset += chunk;
+        delay(10);
+        esp_task_wdt_reset();
+    }
     return true;
 }
 
-void fpIdToUid(uint16_t id, char *buf)
+// ========================================
+// FINGER ID STRING
+// ========================================
+static void fingerIdToStr(uint32_t id, char *out)
 {
-    snprintf(buf, FP_UID_LEN + 1, "%s%07u", FP_ID_PREFIX, id);
+    snprintf(out, 11, "%010lu", id);
 }
 
+// ========================================
+// FINGER DB: VERSION
+// ========================================
+static void fpSaveVersion(const char *ver)
+{
+    acquireSD();
+    selectSD();
+    if (file.open(FINGER_VER_FILE, O_WRONLY | O_CREAT | O_TRUNC))
+    {
+        file.print(ver);
+        file.close();
+    }
+    deselectSD();
+    releaseSD();
+}
+
+static bool fpLoadVersion(char *out, size_t len)
+{
+    acquireSD();
+    selectSD();
+    if (!sd.exists(FINGER_VER_FILE))
+    {
+        deselectSD();
+        releaseSD();
+        return false;
+    }
+    if (!file.open(FINGER_VER_FILE, O_RDONLY))
+    {
+        deselectSD();
+        releaseSD();
+        return false;
+    }
+    file.fgets(out, len);
+    file.close();
+    deselectSD();
+    releaseSD();
+    return true;
+}
+
+// ========================================
+// SYNC FINGER DB DARI SERVER
+// ========================================
+bool syncFingerDB()
+{
+    if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
+        return false;
+
+    HTTPClient http;
+    http.setTimeout(8000);
+    http.setConnectTimeout(5000);
+
+    char url[96];
+    strcpy_P(url, API_BASE_URL);
+    strcat_P(url, PSTR("/api/presensi/finger/version"));
+    if (!http.begin(getSecureClient(), url))
+        return false;
+
+    char apiKey[32];
+    strcpy_P(apiKey, API_SECRET_KEY);
+    http.addHeader(F("X-API-KEY"), apiKey);
+
+    int code = http.GET();
+    if (code != 200)
+    {
+        http.end();
+        return false;
+    }
+
+    String body = http.getString();
+    http.end();
+
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, body) != DeserializationError::Ok)
+        return false;
+
+    char serverVer[24];
+    snprintf(serverVer, sizeof(serverVer), "%lu", (unsigned long)(doc["version"] | 0));
+    int serverCount = doc["count"] | 0;
+
+    char localVer[24] = "0";
+    fpLoadVersion(localVer, sizeof(localVer));
+
+    if (strcmp(localVer, serverVer) == 0)
+    {
+        acquireSD();
+        selectSD();
+        bool exists = sd.exists(FINGER_DB_FILE);
+        deselectSD();
+        releaseSD();
+        if (exists)
+            return true;
+    }
+
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d RECORDS", serverCount);
+    showOLED(F("FINGER SYNC"), buf);
+
+    char dlUrl[96];
+    strcpy_P(dlUrl, API_BASE_URL);
+    strcat_P(dlUrl, PSTR("/api/presensi/finger/download"));
+
+    HTTPClient dlHttp;
+    dlHttp.setTimeout(60000);
+    dlHttp.setConnectTimeout(10000);
+    if (!dlHttp.begin(getSecureClient(), dlUrl))
+        return false;
+
+    char apiKey2[32];
+    strcpy_P(apiKey2, API_SECRET_KEY);
+    dlHttp.addHeader(F("X-API-KEY"), apiKey2);
+
+    int dlCode = dlHttp.GET();
+    if (dlCode != 200)
+    {
+        dlHttp.end();
+        return false;
+    }
+
+    WiFiClient *stream = dlHttp.getStreamPtr();
+    int total = dlHttp.getSize();
+
+    acquireSD();
+    selectSD();
+    if (sd.exists(FINGER_DB_FILE))
+        sd.remove(FINGER_DB_FILE);
+
+    bool writeOk = false;
+    if (file.open(FINGER_DB_FILE, O_WRONLY | O_CREAT))
+    {
+        uint8_t chunk[512];
+        int written = 0;
+        unsigned long t = millis();
+        while (dlHttp.connected() && (total < 0 || written < total) && millis() - t < 60000)
+        {
+            int avail = stream->available();
+            if (avail > 0)
+            {
+                int r = stream->readBytes(chunk, min(avail, (int)sizeof(chunk)));
+                file.write(chunk, r);
+                written += r;
+                esp_task_wdt_reset();
+            }
+            else
+                delay(2);
+        }
+        file.sync();
+        file.close();
+        writeOk = true;
+    }
+    deselectSD();
+    releaseSD();
+    dlHttp.end();
+
+    if (!writeOk)
+        return false;
+
+    fpSaveVersion(serverVer);
+    showOLED(F("FINGER SYNC"), "SELESAI");
+    delay(800);
+    return true;
+}
+
+// ========================================
+// FINGERPRINT: SEARCH 1:N VIA SD
+// ========================================
+static bool fpSearchFromSD(char *outRfid)
+{
+    if (!sdCardAvailable)
+        return false;
+
+    acquireSD();
+    selectSD();
+    if (!file.open(FINGER_DB_FILE, O_RDONLY))
+    {
+        deselectSD();
+        releaseSD();
+        return false;
+    }
+
+    uint8_t *tmpl = (uint8_t *)malloc(FP_TEMPLATE_SIZE);
+    if (!tmpl)
+    {
+        file.close();
+        deselectSD();
+        releaseSD();
+        return false;
+    }
+
+    bool found = false;
+
+    while (file.available())
+    {
+        esp_task_wdt_reset();
+
+        uint8_t hdr[FP_RECORD_HEADER];
+        if (file.read(hdr, FP_RECORD_HEADER) != FP_RECORD_HEADER)
+            break;
+
+        uint16_t tmplLen = ((uint16_t)hdr[20] << 8) | hdr[21];
+        if (tmplLen == 0 || tmplLen > FP_TEMPLATE_SIZE)
+        {
+            file.seekCur(tmplLen);
+            continue;
+        }
+        if ((int)file.read(tmpl, tmplLen) != tmplLen)
+            break;
+
+        deselectSD();
+
+        if (zw101DownloadChar(tmpl, tmplLen))
+        {
+            uint16_t score = zw101Match();
+            if (score >= FP_MATCH_THRESHOLD)
+            {
+                memcpy(outRfid, hdr + 10, 10);
+                outRfid[10] = '\0';
+                found = true;
+                selectSD();
+                break;
+            }
+        }
+
+        selectSD();
+    }
+
+    free(tmpl);
+    file.close();
+    deselectSD();
+    releaseSD();
+    return found;
+}
+
+// ========================================
+// FINGERPRINT: VERIFIKASI
+// ========================================
 void handleFingerprintScan()
 {
-    if (!fpAvailable)
+    if (!zw101GenImg())
         return;
-    if (rfidFeedback.active)
+    if (!zw101Img2Tz(1))
         return;
-    if (millis() - timers.lastFpScan < DEBOUNCE_TIME)
-        return;
-
-    uint8_t p = finger.getImage();
-    if (p != FINGERPRINT_OK)
-        return;
-
-    timers.lastFpScan = millis();
-
-    p = finger.image2Tz();
-    if (p != FINGERPRINT_OK)
-    {
-        bool wasOff = !oledIsOn;
-        if (wasOff)
-            turnOnOLED();
-        showOLED(F("FINGERPRINT"), "COBA LAGI");
-        playToneError();
-        rfidFeedback.active = true;
-        rfidFeedback.shownAt = millis();
-        rfidFeedback.wasOledOff = wasOff;
-        return;
-    }
-
-    p = finger.fingerSearch();
-    if (p == FINGERPRINT_NOTFOUND)
-    {
-        bool wasOff = !oledIsOn;
-        if (wasOff)
-            turnOnOLED();
-        showOLED(F("FINGERPRINT"), "TIDAK DIKENAL");
-        playToneError();
-        rfidFeedback.active = true;
-        rfidFeedback.shownAt = millis();
-        rfidFeedback.wasOledOff = wasOff;
-        return;
-    }
-    if (p != FINGERPRINT_OK)
-        return;
-
-    char fpUid[FP_UID_LEN + 1];
-    fpIdToUid(finger.fingerID, fpUid);
 
     bool wasOff = !oledIsOn;
     if (wasOff)
         turnOnOLED();
-    showOLED(F("FINGERPRINT"), fpUid);
+
+    showOLED(F("FINGER"), "MEMVERIFIKASI...");
+
+    char rfidBuf[11] = {0};
+    if (!fpSearchFromSD(rfidBuf))
+    {
+        showOLED(F("FINGER"), "TIDAK DIKENAL");
+        playToneError();
+        rfidFeedback.active = true;
+        rfidFeedback.shownAt = millis();
+        rfidFeedback.wasOledOff = wasOff;
+        return;
+    }
+
+    showOLED(F("FINGER OK"), rfidBuf);
     playToneNotify();
 
-    processPresensi(fpUid);
+    char message[32];
+    bool success = kirimPresensi(rfidBuf, message);
+
+    showOLED(success ? F("BERHASIL") : F("INFO"), message);
+    success ? playToneSuccess() : playToneError();
+
+    rfidFeedback.active = true;
+    rfidFeedback.shownAt = millis();
+    rfidFeedback.wasOledOff = wasOff;
+}
+
+// ========================================
+// FINGERPRINT: ENROLLMENT
+// ========================================
+static bool checkHasFinger(const char *rfid)
+{
+    if (WiFi.status() != WL_CONNECTED)
+        return true;
+
+    HTTPClient http;
+    http.setTimeout(5000);
+    http.setConnectTimeout(3000);
+
+    char url[96];
+    strcpy_P(url, API_BASE_URL);
+    strcat_P(url, PSTR("/api/presensi/status/"));
+    strncat(url, rfid, 10);
+
+    if (!http.begin(getSecureClient(), url))
+        return true;
+
+    char apiKey[32];
+    strcpy_P(apiKey, API_SECRET_KEY);
+    http.addHeader(F("X-API-KEY"), apiKey);
+
+    int code = http.GET();
+    if (code != 200)
+    {
+        http.end();
+        return true;
+    }
+
+    String body = http.getString();
+    http.end();
+
+    DynamicJsonDocument doc(512);
+    if (deserializeJson(doc, body) != DeserializationError::Ok)
+        return true;
+    return doc["data"]["has_finger"] | true;
+}
+
+static bool waitFinger(uint32_t timeout)
+{
+    unsigned long t = millis();
+    int attempt = 0;
+    while (millis() - t < timeout)
+    {
+        esp_task_wdt_reset();
+        zw101Flush();
+        const uint8_t c[] = {0x01};
+        zw101Send(0x01, c, 1);
+        uint8_t buf[16];
+        int n = zw101Read(buf, 16, 500);
+        attempt++;
+        Serial.print("[FP] attempt=");
+        Serial.print(attempt);
+        Serial.print(" n=");
+        Serial.print(n);
+        if (n > 0)
+        {
+            Serial.print(" buf[9]=0x");
+            Serial.print(buf[9], HEX);
+        }
+        Serial.println();
+        if (n >= 10 && buf[0] == 0xEF && buf[9] == 0x00)
+            return true;
+        delay(100);
+    }
+    Serial.print("[FP] waitFinger timeout after ");
+    Serial.print(attempt);
+    Serial.println(" attempts");
+    return false;
+}
+
+void handleEnrollment(const char *rfidUID)
+{
+    showOLED(F("ENROLL"), "TEMPELKAN JARI");
+    playToneNotify();
+
+    Serial.println("[ENROLL] start");
+    Serial.print("[ENROLL] PIN_RFID_SS=");
+    Serial.println(digitalRead(PIN_RFID_SS));
+    Serial.print("[ENROLL] PIN_SD_CS=");
+    Serial.println(digitalRead(PIN_SD_CS));
+
+    // Probe GenImg sekali untuk lihat raw response
+    {
+        zw101Flush();
+        const uint8_t c[] = {0x01};
+        zw101Send(0x01, c, 1);
+        uint8_t buf[16];
+        int n = zw101Read(buf, 16, 2000);
+        Serial.print("[ENROLL] GenImg probe RX[");
+        Serial.print(n);
+        Serial.print("]: ");
+        for (int i = 0; i < n; i++)
+        {
+            if (buf[i] < 0x10)
+                Serial.print("0");
+            Serial.print(buf[i], HEX);
+            Serial.print(" ");
+        }
+        Serial.println();
+    }
+
+    if (!waitFinger(FP_ENROLL_WAIT_MS))
+    {
+        Serial.println("[ENROLL] GAGAL: tidak ada jari");
+        showOLED(F("ENROLL GAGAL"), "TIDAK ADA JARI");
+        playToneError();
+        delay(1500);
+        return;
+    }
+    Serial.println("[ENROLL] jari 1 terdeteksi");
+    if (!zw101Img2Tz(1))
+    {
+        Serial.println("[ENROLL] GAGAL: Img2Tz(1)");
+        showOLED(F("ENROLL GAGAL"), "IMAGE BURUK");
+        playToneError();
+        delay(1500);
+        return;
+    }
+    Serial.println("[ENROLL] Img2Tz(1) OK");
+
+    showOLED(F("ENROLL"), "ANGKAT JARI...");
+    delay(1200);
+    while (zw101GenImg())
+    {
+        esp_task_wdt_reset();
+        delay(200);
+    }
+
+    showOLED(F("ENROLL"), "TEMPEL LAGI");
+    playToneNotify();
+
+    if (!waitFinger(FP_ENROLL_WAIT_MS))
+    {
+        showOLED(F("ENROLL GAGAL"), "TIDAK ADA JARI");
+        playToneError();
+        delay(1500);
+        return;
+    }
+    if (!zw101Img2Tz(2))
+    {
+        showOLED(F("ENROLL GAGAL"), "IMAGE BURUK");
+        playToneError();
+        delay(1500);
+        return;
+    }
+    if (!zw101CreateModel())
+    {
+        showOLED(F("ENROLL GAGAL"), "JARI BERBEDA");
+        playToneError();
+        delay(1500);
+        return;
+    }
+
+    uint8_t *tmpl = (uint8_t *)malloc(FP_TEMPLATE_SIZE);
+    if (!tmpl)
+    {
+        showOLED(F("ENROLL GAGAL"), "MEMORY ERROR");
+        playToneError();
+        delay(1500);
+        return;
+    }
+
+    int tmplLen = zw101UploadChar(tmpl, FP_TEMPLATE_SIZE);
+    if (tmplLen < 100)
+    {
+        free(tmpl);
+        showOLED(F("ENROLL GAGAL"), "UPLOAD ERR");
+        playToneError();
+        delay(1500);
+        return;
+    }
+
+    uint32_t fingerId = (uint32_t)(time(nullptr) & 0xFFFFFFFF);
+    char fingerIdStr[11];
+    fingerIdToStr(fingerId, fingerIdStr);
+
+    size_t b64Len = 0;
+    mbedtls_base64_encode(nullptr, 0, &b64Len, tmpl, tmplLen);
+    char *b64 = (char *)malloc(b64Len + 1);
+    if (!b64)
+    {
+        free(tmpl);
+        showOLED(F("ENROLL GAGAL"), "MEMORY ERROR");
+        playToneError();
+        delay(1500);
+        return;
+    }
+    mbedtls_base64_encode((uint8_t *)b64, b64Len + 1, &b64Len, tmpl, tmplLen);
+    b64[b64Len] = '\0';
+
+    showOLED(F("ENROLL"), "UPLOAD SERVER");
+
+    bool uploaded = false;
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        HTTPClient http;
+        http.setTimeout(15000);
+        http.setConnectTimeout(8000);
+
+        char url[96];
+        strcpy_P(url, API_BASE_URL);
+        strcat_P(url, PSTR("/api/presensi/finger/enroll"));
+
+        if (http.begin(getSecureClient(), url))
+        {
+            http.addHeader(F("Content-Type"), F("application/json"));
+            char apiKey[32];
+            strcpy_P(apiKey, API_SECRET_KEY);
+            http.addHeader(F("X-API-KEY"), apiKey);
+
+            String payload = F("{\"rfid\":\"");
+            payload += rfidUID;
+            payload += F("\",\"finger_id\":\"");
+            payload += fingerIdStr;
+            payload += F("\",\"template\":\"");
+            payload += b64;
+            payload += F("\"}");
+
+            int rcode = http.POST(payload);
+            http.end();
+            uploaded = (rcode == 200);
+        }
+    }
+
+    free(b64);
+
+    if (!uploaded)
+    {
+        free(tmpl);
+        showOLED(F("ENROLL GAGAL"), "SERVER ERR");
+        playToneError();
+        delay(1500);
+        return;
+    }
+
+    if (sdCardAvailable)
+    {
+        acquireSD();
+        selectSD();
+        if (file.open(FINGER_DB_FILE, O_WRONLY | O_CREAT | O_APPEND))
+        {
+            uint8_t hdr[FP_RECORD_HEADER];
+            memcpy(hdr, fingerIdStr, 10);
+            memcpy(hdr + 10, rfidUID, 10);
+            hdr[20] = (tmplLen >> 8) & 0xFF;
+            hdr[21] = tmplLen & 0xFF;
+            file.write(hdr, FP_RECORD_HEADER);
+            file.write(tmpl, tmplLen);
+            file.sync();
+            file.close();
+        }
+        deselectSD();
+        releaseSD();
+    }
+
+    free(tmpl);
+
+    char newVer[24];
+    snprintf(newVer, sizeof(newVer), "%lu", (unsigned long)time(nullptr));
+    fpSaveVersion(newVer);
+
+    showOLED(F("ENROLL OK"), fingerIdStr);
+    playToneSuccess();
+    delay(2000);
 }
 
 // ========================================
@@ -402,7 +1060,6 @@ void checkOtaUpdate()
     char url[80];
     strcpy_P(url, API_BASE_URL);
     strcat_P(url, PSTR("/api/presensi/firmware/check"));
-
     if (!http.begin(getSecureClient(), url))
         return;
 
@@ -412,9 +1069,7 @@ void checkOtaUpdate()
     http.addHeader(F("X-API-KEY"), apiKey);
 
     char payload[64];
-    snprintf(payload, sizeof(payload),
-             "{\"version\":\"%s\",\"device_id\":\"%s\"}",
-             FIRMWARE_VERSION, deviceId);
+    snprintf(payload, sizeof(payload), "{\"version\":\"%s\",\"device_id\":\"%s\"}", FIRMWARE_VERSION, deviceId);
 
     int code = http.POST(payload);
     if (code != 200)
@@ -505,9 +1160,9 @@ void performOtaUpdate()
             size_t available = stream->available();
             if (available)
             {
-                int read = stream->readBytes(buff, min((size_t)sizeof(buff), available));
-                Update.write(buff, read);
-                written += read;
+                int rd = stream->readBytes(buff, min((size_t)sizeof(buff), available));
+                Update.write(buff, rd);
+                written += rd;
             }
             delay(1);
         }
@@ -536,7 +1191,6 @@ reinit_wdt:
         .trigger_panic = true};
     esp_task_wdt_init(&wdtConfig);
     esp_task_wdt_add(nullptr);
-
     memset(&previousDisplay, 0xFF, sizeof(previousDisplay));
 }
 
@@ -796,7 +1450,6 @@ bool nvsSyncToServer()
     {
         String body = http.getString();
         http.end();
-
         DynamicJsonDocument res(4096);
         if (deserializeJson(res, body) == DeserializationError::Ok)
         {
@@ -808,7 +1461,6 @@ bool nvsSyncToServer()
                     appendFailedLog(item["rfid"] | "unknown", item["timestamp"] | "unknown", item["message"] | "UNKNOWN");
             }
         }
-
         for (int i = 0; i < count; i++)
             nvsDeleteRecord(i);
         nvsSetCount(0);
@@ -1159,7 +1811,6 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
         int nextFile = (currentQueueFile + 1) % MAX_QUEUE_FILES;
         char nextFilename[20];
         getQueueFileName(nextFile, nextFilename, sizeof(nextFilename));
-
         if (sd.exists(nextFilename))
         {
             int nextCount = countRecordsInFile(nextFilename);
@@ -1171,7 +1822,6 @@ bool saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime
             }
             sd.remove(nextFilename);
         }
-
         currentQueueFile = nextFile;
         getQueueFileName(currentQueueFile, currentFile, sizeof(currentFile));
         if (!file.open(currentFile, O_WRONLY | O_CREAT))
@@ -1250,7 +1900,6 @@ RfidValidResult validateRfidOnline(const char *rfid)
     char url[80];
     strcpy_P(url, API_BASE_URL);
     strcat_P(url, PSTR("/api/presensi/validate"));
-
     if (!http.begin(getSecureClient(), url))
         return RFID_UNREACHABLE;
 
@@ -1392,7 +2041,6 @@ bool syncQueueFile(const char *filename)
     {
         String body = http.getString();
         http.end();
-
         DynamicJsonDocument res(4096);
         if (deserializeJson(res, body) == DeserializationError::Ok)
         {
@@ -1404,7 +2052,6 @@ bool syncQueueFile(const char *filename)
                     appendFailedLog(item["rfid"] | "unknown", item["timestamp"] | "unknown", item["message"] | "UNKNOWN");
             }
         }
-
         acquireSD();
         selectSD();
         sd.remove(filename);
@@ -1656,6 +2303,7 @@ bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
 {
     if (WiFi.status() != WL_CONNECTED)
         return false;
+
     HTTPClient http;
     http.setTimeout(10000);
     http.setConnectTimeout(5000);
@@ -1664,6 +2312,7 @@ bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
     strcat_P(url, PSTR("/api/presensi"));
     if (!http.begin(getSecureClient(), url))
         return false;
+
     http.addHeader(F("Content-Type"), F("application/json"));
     char apiKey[32];
     strcpy_P(apiKey, API_SECRET_KEY);
@@ -1715,13 +2364,11 @@ bool kirimPresensi(const char *rfidUID, char *message)
             strcpy(message, cachedQueueFileCount >= QUEUE_WARN_THRESHOLD ? "QUEUE HAMPIR PENUH!" : "DATA TERSIMPAN");
             return true;
         }
-
         acquireSD();
         selectSD();
         bool dup = isDuplicateInternal(rfidUID, currentUnixTime);
         deselectSD();
         releaseSD();
-
         strcpy(message, dup ? "CUKUP SEKALI!" : "SD CARD ERROR");
         return false;
     }
@@ -1731,7 +2378,6 @@ bool kirimPresensi(const char *rfidUID, char *message)
         bool sent = kirimLangsung(rfidUID, timestamp, message);
         if (sent)
             return true;
-
         if (nvsIsDuplicate(rfidUID, currentUnixTime))
         {
             strcpy(message, "CUKUP SEKALI!");
@@ -1762,19 +2408,6 @@ bool kirimPresensi(const char *rfidUID, char *message)
     }
     strcpy(message, "BUFFER PENUH!");
     return false;
-}
-
-// ========================================
-// SHARED PRESENSI HANDLER
-// ========================================
-void processPresensi(const char *uid)
-{
-    char message[32];
-    bool success = kirimPresensi(uid, message);
-    showOLED(success ? F("BERHASIL") : F("INFO"), message);
-    success ? playToneSuccess() : playToneError();
-    rfidFeedback.active = true;
-    rfidFeedback.shownAt = millis();
 }
 
 // ========================================
@@ -1917,6 +2550,7 @@ void updateStandbySignal()
         return;
     if (!displayStateChanged())
         return;
+
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
@@ -1939,7 +2573,7 @@ void updateStandbySignal()
         display.print(currentDisplay.isOnline ? F("ONLINE") : F("OFFLINE"));
     }
 
-    const char *tapText = "TAP KARTU/JARI";
+    const char *tapText = "KARTU/JARI";
     int16_t x1, y1;
     uint16_t w1, h1;
     display.getTextBounds(tapText, 0, 0, &x1, &y1, &w1, &h1);
@@ -2042,8 +2676,30 @@ void handleRFIDScan()
     showOLED(F("RFID"), rfidBuffer);
     playToneNotify();
 
+    if (!checkHasFinger(rfidBuffer))
+    {
+        showOLED(F("ENROLL MODE"), "DAFTAR JARI");
+        rfidReader.PICC_HaltA();
+        rfidReader.PCD_StopCrypto1();
+        digitalWrite(PIN_RFID_SS, HIGH);
+        deselectSD();
+        delay(1500);
+        handleEnrollment(rfidBuffer);
+        rfidFeedback.active = true;
+        rfidFeedback.shownAt = millis();
+        rfidFeedback.wasOledOff = wasOff;
+        return;
+    }
+
+    char message[32];
+    bool success = kirimPresensi(rfidBuffer, message);
+
+    showOLED(success ? F("BERHASIL") : F("INFO"), message);
+    success ? playToneSuccess() : playToneError();
+
+    rfidFeedback.active = true;
+    rfidFeedback.shownAt = millis();
     rfidFeedback.wasOledOff = wasOff;
-    processPresensi(rfidBuffer);
 
     rfidReader.PICC_HaltA();
     rfidReader.PCD_StopCrypto1();
@@ -2062,6 +2718,10 @@ void setup()
     esp_task_wdt_init(&wdtConfig);
     esp_task_wdt_add(nullptr);
 
+    Serial.begin(115200);
+    delay(500);
+    Serial.println("[BOOT] v3.0.0 start");
+
     Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
     pinMode(PIN_BUZZER, OUTPUT);
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -2077,6 +2737,9 @@ void setup()
         deviceId[i] = toupper(deviceId[i]);
 
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
+
+    Serial1.begin(FP_BAUD, SERIAL_8N1, PIN_FP_RX, PIN_FP_TX);
+    delay(300);
 
     showProgress(F("INIT SD CARD"), 1500);
     sdCardAvailable = initSDCard();
@@ -2100,7 +2763,6 @@ void setup()
         showOLED(F("SD CARD"), "TIDAK ADA");
         playToneError();
         delay(1000);
-
         int nvsCount = nvsGetCount();
         if (nvsCount > 0)
         {
@@ -2110,24 +2772,6 @@ void setup()
             delay(1000);
         }
     }
-
-    showProgress(F("INIT FINGERPRINT"), 1000);
-    fpAvailable = initFingerprint();
-    if (fpAvailable)
-    {
-        char buf[20];
-        snprintf(buf, sizeof(buf), "%d TEMPLATE", finger.templateCount);
-        showOLED(F("FINGERPRINT OK"), buf);
-        playToneSuccess();
-        delay(800);
-    }
-    else
-    {
-        showOLED(F("FINGERPRINT"), "TIDAK ADA");
-        playToneError();
-        delay(800);
-    }
-    esp_task_wdt_reset();
 
     showProgress(F("CONNECTING WIFI"), 1500);
     bool wifiOk = connectToWiFi();
@@ -2182,6 +2826,8 @@ void setup()
                     chunkedSync();
                     esp_task_wdt_reset();
                 }
+                syncFingerDB();
+                esp_task_wdt_reset();
             }
         }
         else
@@ -2197,8 +2843,8 @@ void setup()
     delay(100);
     digitalWrite(PIN_RFID_SS, HIGH);
 
-    byte version = rfidReader.PCD_ReadRegister(rfidReader.VersionReg);
-    if (version == 0x00 || version == 0xFF)
+    byte ver = rfidReader.PCD_ReadRegister(rfidReader.VersionReg);
+    if (ver == 0x00 || ver == 0xFF)
     {
         showOLED(F("RC522 GAGAL"), "RESTART...");
         playToneError();
@@ -2224,7 +2870,6 @@ void setup()
     timers.lastOLEDScheduleCheck = now;
     timers.lastSDRedetect = now;
     timers.lastNvsSync = now;
-    timers.lastFpScan = now;
     timers.lastOtaCheck = 0;
 
     delay(1000);
@@ -2253,10 +2898,11 @@ void loop()
     if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial())
     {
         handleRFIDScan();
-        return;
     }
-
-    handleFingerprintScan();
+    else
+    {
+        handleFingerprintScan();
+    }
 
     processReconnect();
 
