@@ -375,7 +375,7 @@ void performOtaUpdate()
 
     HTTPClient http;
     http.begin(otaClient, otaState.url);
-    http.addHeader(F("X-API-KEY"), F("P@ndegl@ng_14012000*"));
+    http.addHeader(F("X-API-KEY"), API_SECRET_KEY);
     http.setTimeout(60000);
 
     int code = http.GET();
