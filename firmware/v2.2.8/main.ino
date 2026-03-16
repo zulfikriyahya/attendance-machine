@@ -116,13 +116,6 @@ RTC_DATA_ATTR bool rtcQueueFileValid = false;
 // ========================================
 // ENUMS
 // ========================================
-enum RfidValidResult
-{
-    RFID_VALID,
-    RFID_INVALID,
-    RFID_UNREACHABLE
-};
-
 enum ReconnectState
 {
     RECONNECT_IDLE,
@@ -2182,6 +2175,14 @@ void loop()
             esp_task_wdt_deinit();
             esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
             esp_deep_sleep_start();
+
+            const esp_task_wdt_config_t wdtConfig = {
+            .timeout_ms = WDT_TIMEOUT_SEC * 1000,
+            .idle_core_mask = 0,
+            .trigger_panic = true
+            };
+            esp_task_wdt_init(&wdtConfig);
+            esp_task_wdt_add(nullptr);
         }
     }
     yield();
