@@ -244,7 +244,6 @@ void refreshPendingCache();
 void saveMetadata();
 void loadMetadata();
 void appendFailedLog(const char *rfid, const char *timestamp, const char *reason);
-RfidValidResult validateRfidOnline(const char *rfid);
 WiFiClientSecure &getSecureClient();
 int nvsGetCount();
 void nvsSetCount(int count);
@@ -1141,43 +1140,6 @@ void appendFailedLog(const char *rfid, const char *timestamp, const char *reason
     }
     deselectSD();
     releaseSD();
-}
-
-// ========================================
-// RFID VALIDATION (hanya untuk kondisi tanpa SD)
-// ========================================
-RfidValidResult validateRfidOnline(const char *rfid)
-{
-    if (WiFi.status() != WL_CONNECTED)
-        return RFID_UNREACHABLE;
-
-    HTTPClient http;
-    http.setTimeout(8000);
-    http.setConnectTimeout(5000);
-
-    char url[80];
-    strcpy_P(url, API_BASE_URL);
-    strcat_P(url, PSTR("/api/presensi/validate"));
-
-    if (!http.begin(getSecureClient(), url))
-        return RFID_UNREACHABLE;
-
-    http.addHeader(F("Content-Type"), F("application/json"));
-    char apiKey[32];
-    strcpy_P(apiKey, API_SECRET_KEY);
-    http.addHeader(F("X-API-KEY"), apiKey);
-
-    char payload[32];
-    snprintf(payload, sizeof(payload), "{\"rfid\":\"%s\"}", rfid);
-
-    int code = http.POST(payload);
-    http.end();
-
-    if (code == 200)
-        return RFID_VALID;
-    if (code == 404)
-        return RFID_INVALID;
-    return RFID_UNREACHABLE;
 }
 
 // ========================================
