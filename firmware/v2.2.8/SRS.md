@@ -1,8 +1,10 @@
 # Software Requirements Specification (SRS)
-## Sistem Presensi Pintar (RFID) — Queue System
+## Sistem Presensi Pintar Berbasis IoT — Hybrid Edition
+**Project:** Madrasah Universe
 **Versi:** 2.2.8
 **Device:** ESP32-C3 Super Mini
 **Author:** Yahya Zulfikri
+**IDE:** Arduino IDE v2.3.6
 **Dibuat:** Juli 2025
 **Diperbarui:** Maret 2026
 **Status:** Final
@@ -12,104 +14,167 @@
 ## 1. PENDAHULUAN
 
 ### 1.1 Tujuan
-Dokumen ini mendeskripsikan seluruh persyaratan fungsional dan non-fungsional untuk firmware Sistem Presensi Pintar berbasis RFID yang berjalan di atas mikrokontroler ESP32-C3 Super Mini. Sistem ini dirancang untuk mencatat kehadiran pegawai dan siswa melalui tap kartu RFID, dengan kemampuan menyimpan data secara offline dan mensinkronisasikannya ke server secara otomatis.
+Dokumen ini mendeskripsikan seluruh persyaratan fungsional, non-fungsional, dan alur logika untuk firmware Sistem Presensi Pintar berbasis RFID yang berjalan di atas mikrokontroler ESP32-C3 Super Mini. Sistem ini dirancang untuk mencatat kehadiran pegawai dan siswa melalui tap kartu RFID dengan filosofi _Self-Healing_ dan _Store-and-Forward_, menjamin integritas data kehadiran tanpa kehilangan (_zero data loss_).
 
 ### 1.2 Ruang Lingkup
 Firmware ini menangani:
 - Pembacaan kartu RFID dan pencatatan presensi
-- Penyimpanan data offline ke SD card dan NVS buffer
-- Sinkronisasi data ke server via HTTPS
+- Penyimpanan data offline ke SD card (Queue System) dan NVS buffer internal
+- Sinkronisasi data latar belakang ke server via HTTPS (non-blocking)
 - Update firmware otomatis via OTA
 - Manajemen daya dengan deep sleep dan OLED scheduling
 - Feedback visual (OLED) dan audio (buzzer) ke pengguna
+- Reconnect WiFi otomatis via state machine
 
-### 1.3 Definisi dan Singkatan
+### 1.3 Riwayat Versi
+
+| Versi | Tanggal | Perubahan |
+|---|---|---|
+| v2.2.7 | Maret 2026 | Rilis awal sistem hybrid: Queue System + NVS Buffer, reconnect state machine, deep sleep, OLED auto dim, bulk sync chunked |
+| v2.2.8 | Maret 2026 | Tambah OTA update otomatis, perbaikan WDT coverage, hapus `validateRfidOnline()` dan `enum RfidValidResult`, tambah WDT safety net setelah deep sleep, prioritas kecepatan tap queue-first |
+
+### 1.4 Definisi dan Singkatan
 
 | Istilah | Definisi |
 |---|---|
 | RFID | Radio Frequency Identification — teknologi identifikasi nirsentuh |
-| NVS | Non-Volatile Storage — penyimpanan internal ESP32 yang persisten |
+| NVS | Non-Volatile Storage — penyimpanan internal ESP32 yang persisten melewati restart dan deep sleep |
 | OTA | Over-The-Air — mekanisme update firmware via jaringan |
 | WDT | Watchdog Timer — mekanisme reset otomatis jika sistem hang |
 | Queue | Antrian file CSV di SD card untuk data presensi offline |
-| Sync | Proses pengiriman data offline ke server |
+| Sync | Proses pengiriman data offline ke server secara batch |
 | Deep Sleep | Mode tidur ESP32 dengan konsumsi daya sangat rendah |
 | RTC Memory | Memori ESP32 yang tetap tersimpan saat deep sleep |
+| Queue-First | Strategi simpan ke SD langsung tanpa validasi jaringan saat tap |
+| Store-and-Forward | Data disimpan lokal, dikirim ke server saat koneksi tersedia |
 
-### 1.4 Konteks Sistem
+### 1.5 Konteks Sistem
 - **Sumber daya:** Adaptor listrik PLN dengan baterai 1000–3000 mAh sebagai UPS
-- **Konektivitas:** WiFi 2.4GHz, dengan kemampuan operasi offline penuh
+- **Konektivitas:** WiFi 2.4GHz single SSID, dengan kemampuan operasi offline penuh
 - **Pengguna:** Pegawai dan siswa yang melakukan tap kartu RFID
-- **Backend:** Server Laravel di `https://zedlabs.id` dengan autentikasi API Key
+- **Backend:** Server Laravel di `https://zedlabs.id` dengan autentikasi API Key (`X-API-KEY`)
+- **Integrasi hilir:** Notifikasi WhatsApp, laporan digital, analisis kehadiran
 
 ---
 
-## 2. ALUR LOGIKA SISTEM
+## 2. ARSITEKTUR SISTEM
 
-### 2.1 Fase Boot / Setup
+### 2.1 Hardware
+
+| Komponen | Pin ESP32-C3 | Protokol | Fungsi |
+|---|---|---|---|
+| ESP32-C3 Super Mini | — | — | Mikrokontroler utama |
+| RFID RC522 | SS:7, RST:3, SCK:4, MOSI:6, MISO:5 | SPI | Pembaca kartu RFID 13.56MHz |
+| MicroSD Card | CS:1, SCK:4, MOSI:6, MISO:5 | SPI (shared) | Penyimpanan offline queue (opsional) |
+| OLED SSD1306 0.96" | SDA:8, SCL:9 | I2C | Display feedback & status |
+| Buzzer Aktif 5V | PIN:10 | PWM | Feedback audio |
+
+### 2.2 Lapisan Penyimpanan Data
+
+```
+Tap Kartu
+    │
+    ├─ [1] SD Card (Prioritas Utama)
+    │       Queue CSV, max 50.000 record, queue-first tanpa validasi jaringan
+    │
+    ├─ [2] NVS Buffer (Fallback SD tidak ada)
+    │       Flash internal ESP32, max 20 record, persisten
+    │
+    └─ [3] Kirim Langsung (SD tidak ada + WiFi tersedia)
+            POST /api/presensi, fallback ke NVS jika gagal
+```
+
+### 2.3 Endpoint Server
+
+| Endpoint | Method | Fungsi |
+|---|---|---|
+| `/api/presensi/ping` | GET | Health check koneksi API |
+| `/api/presensi` | POST | Kirim presensi langsung (tanpa SD) |
+| `/api/presensi/sync-bulk` | POST | Sinkronisasi bulk data offline (SD + NVS) |
+| `/api/presensi/firmware/check` | POST | Cek ketersediaan update OTA |
+| `/api/presensi/firmware/download/{file}` | GET | Download binary firmware OTA |
+
+### 2.4 Struktur File SD Card
+
+```
+/
+├── queue_0.csv         ← File antrean aktif (max 25 record/file)
+├── queue_1.csv
+├── ...
+├── queue_1999.csv      ← Max 2000 file
+├── queue_meta.txt      ← Cache: "pending_count,current_file_index"
+└── failed_log.csv      ← Log record ditolak server saat sync
+```
+
+---
+
+## 3. ALUR LOGIKA SISTEM
+
+### 3.1 Fase Boot / Setup
 ```
 [Power ON / Reboot]
-  ├─ Init WDT (60 detik)
-  ├─ Init I2C (OLED SDA:8, SCL:9) + Buzzer (PIN:10)
-  ├─ Init OLED SSD1306 → tampilkan animasi startup + startup melody
-  ├─ Baca MAC Address → generate deviceId = "ESP32_XXYY" (huruf kapital)
+  ├─ Init WDT (60 detik, trigger_panic = true)
+  ├─ Init I2C (SDA:8, SCL:9) + Buzzer (PIN:10)
+  ├─ Init OLED SSD1306 0x3C → animasi startup + startup melody
+  ├─ Baca MAC Address → generate deviceId = "ESP32_XXYY" (kapital)
   ├─ Init SPI Bus (SCK:4, MISO:5, MOSI:6)
   │
-  ├─ [Init SD Card]
+  ├─ [Init SD Card] — showProgress "INIT SD CARD"
   │    ├─ BERHASIL
   │    │    ├─ loadMetadata() → restore cachedPendingRecords + currentQueueFile
-  │    │    ├─ Jika metadata tidak ada → cari file queue belum penuh / buat baru
+  │    │    ├─ Jika metadata tidak ada → scan queue files → cari yang belum penuh
+  │    │    │    └─ Tidak ada → buat queue_0.csv baru
   │    │    └─ Jika cachedPendingRecords > 0 → tampilkan "DATA OFFLINE: X TERSISA"
   │    └─ GAGAL
   │         ├─ Tampilkan "SD CARD TIDAK ADA"
-  │         └─ Jika NVS count > 0 → tampilkan "NVS BUFFER: X TERSISA"
+  │         └─ Jika nvsGetCount() > 0 → tampilkan "NVS BUFFER: X TERSISA"
   │
-  ├─ [Koneksi WiFi] (max 20 retry × 300ms)
-  │    ├─ BERHASIL → [Ping API] (max 3 retry)
-  │    │              ├─ API OK
-  │    │              │    ├─ syncTimeWithFallback()
-  │    │              │    ├─ Jika NVS count > 0 → nvsSyncToServer()
-  │    │              │    └─ Jika SD ada + pending > 0 → chunkedSync()
-  │    │              └─ API GAGAL → "OFFLINE MODE"
+  ├─ [Koneksi WiFi] — showProgress "CONNECTING WIFI" (max 20×300ms)
+  │    ├─ BERHASIL → [Ping API] max 3 retry
+  │    │    ├─ API OK
+  │    │    │    ├─ syncTimeWithFallback() → NTP sync
+  │    │    │    ├─ Jika NVS count > 0 → nvsSyncToServer()
+  │    │    │    └─ Jika SD ada + pending > 0 → chunkedSync()
+  │    │    └─ GAGAL 3x → "API GAGAL / OFFLINE MODE"
   │    └─ GAGAL → offlineBootFallback() → "NO WIFI / OFFLINE MODE"
   │
-  ├─ [Init RFID RC522]
-  │    └─ VersionReg = 0x00 atau 0xFF → tampilkan "RC522 GAGAL" → ESP.restart()
+  ├─ [Init RFID RC522] — showProgress "INIT RFID"
+  │    └─ VersionReg = 0x00 atau 0xFF → "RC522 GAGAL" → delay 3s → ESP.restart()
   │
-  ├─ Tampilkan "SISTEM SIAP" + status ONLINE/OFFLINE
-  ├─ Set semua timer
+  ├─ Tampilkan "SISTEM SIAP" + ONLINE/OFFLINE + playToneSuccess()
+  ├─ Set semua timer (lastOtaCheck = 0 → OTA langsung dicek saat pertama)
   └─ checkOLEDSchedule() → masuk LOOP
 ```
 
-### 2.2 Fase Main Loop
+### 3.2 Fase Main Loop
 ```
 [LOOP - berjalan terus menerus]
   │
   ├─ [1] esp_task_wdt_reset()
   │
   ├─ [2] Cek RFID Feedback Timer
-  │       └─ Jika aktif dan ≥ 1800ms sejak ditampilkan
+  │       └─ Jika aktif dan ≥ 1800ms
   │            ├─ rfidFeedback.active = false
   │            ├─ Jika wasOledOff → checkOLEDSchedule()
   │            └─ Reset previousDisplay (paksa redraw standby)
   │
   ├─ [3] checkOLEDSchedule() — setiap 60 detik
-  │       ├─ Jam 08:00–14:00 → turnOffOLED() [hemat baterai]
+  │       ├─ Jam 08:00–14:00 → turnOffOLED() [hemat daya baterai UPS]
   │       └─ Di luar jam itu  → turnOnOLED()
   │
   ├─ [4] checkSDHealth() — setiap 30 detik
-  │       ├─ SD tidak ada → coba reinitSDCard()
-  │       │    └─ Berhasil → tampilkan "SD CARD TERBACA KEMBALI"
-  │       └─ SD ada → cek via fatType()
-  │            └─ Tidak sehat → sdCardAvailable = false → "SD CARD TERLEPAS!"
+  │       ├─ SD tidak ada → reinitSDCard()
+  │       │    └─ Berhasil → "SD CARD TERBACA KEMBALI" + playToneSuccess()
+  │       └─ SD ada → cek via sd.vol()->fatType()
+  │            └─ Tidak sehat → sdCardAvailable=false → "SD CARD TERLEPAS!"
   │
-  ├─ [5] CEK KARTU RFID (PRIORITAS TERTINGGI)
+  ├─ [5] ⭐ CEK KARTU RFID (PRIORITAS TERTINGGI)
   │       └─ PICC_IsNewCardPresent() && PICC_ReadCardSerial()
-  │            └─ handleRFIDScan() → return (skip sisa loop iterasi ini)
+  │            └─ handleRFIDScan() → return (skip sisa loop)
   │
-  ├─ [6] processReconnect() — state machine
-  │       ├─ IDLE    → jika WiFi putus dan ≥ 5 menit → INIT
-  │       ├─ INIT    → disconnect + WiFi.begin() → TRYING
+  ├─ [6] processReconnect() — state machine 5 state
+  │       ├─ IDLE    → WiFi putus + ≥5 menit → INIT
+  │       ├─ INIT    → WiFi.disconnect() + WiFi.begin() → TRYING
   │       ├─ TRYING  → tunggu max 15 detik
   │       │    ├─ Connected → SUCCESS
   │       │    └─ Timeout   → FAILED → IDLE
@@ -117,77 +182,79 @@ Firmware ini menangani:
   │            ├─ isOnline = true
   │            ├─ syncTimeWithFallback()
   │            ├─ Jika NVS count > 0 → nvsSyncToServer()
-  │            ├─ Jika SD + pending > 0 → chunkedSync()
+  │            ├─ Jika SD ada + pending > 0 → chunkedSync()
   │            └─ → IDLE
   │
-  ├─ [7] Update Display — setiap 1 detik
-  │       ├─ updateCurrentDisplayState()
-  │       │    ├─ Status WiFi, jam, pendingRecords (SD+NVS), sinyal WiFi
-  │       └─ updateStandbySignal() — hanya jika state berubah
-  │            ├─ Baris 1: CONNECTING... / SYNCING... / ONLINE / OFFLINE
-  │            ├─ Baris 2: "TAP KARTU"
-  │            ├─ Baris 3: jam HH:MM
-  │            ├─ Baris 4: "Q:X" jika pending > 0
-  │            └─ Pojok kanan: bar sinyal WiFi (4 bar)
+  ├─ [7] Update Display — setiap 1 detik, hanya jika state berubah
+  │       ├─ Baris kiri atas: CONNECTING... / SYNCING... / ONLINE / OFFLINE
+  │       ├─ Tengah: "TAP KARTU"
+  │       ├─ Tengah bawah: jam HH:MM
+  │       ├─ Bawah: "Q:X" jika pending > 0
+  │       └─ Pojok kanan atas: bar sinyal WiFi (4 level)
   │
   ├─ [8] Periodic Check — setiap 1 detik
   │       ├─ [Jika WiFi connected]
   │       │    ├─ checkOtaUpdate() — guard internal 3 jam
-  │       │    │    └─ Jika ada update → set otaState.updateAvailable = true
+  │       │    │    ├─ POST /firmware/check dengan versi + device_id
+  │       │    │    └─ Ada update → simpan ke otaState → "UPDATE vX.X.X TERSEDIA"
   │       │    ├─ Jika otaState.updateAvailable && !rfidFeedback.active
   │       │    │    └─ performOtaUpdate()
-  │       │    ├─ Jika NVS count > 0 && ≥ 5 menit → nvsSyncToServer()
+  │       │    ├─ Jika NVS count > 0 && ≥5 menit → nvsSyncToServer()
   │       │    └─ Jika SD ada
-  │       │         ├─ syncState.inProgress → chunkedSync() (lanjutkan)
-  │       │         └─ Jika ≥ 5 menit && pending > 0 → chunkedSync() (mulai baru)
+  │       │         ├─ syncState.inProgress → chunkedSync() lanjut
+  │       │         └─ ≥5 menit && pending > 0 → chunkedSync() mulai baru
   │       └─ periodicTimeSync() — setiap 1 jam
   │
   └─ [9] Sleep Mode Check
-          └─ Jika jam 18:00–05:00 && waktu valid
+          └─ Jam 18:00–05:00 && waktu valid
                ├─ Jika sync sedang berjalan → chunkedSync() → return
+               ├─ Tampilkan "SLEEP MODE..."
                ├─ Hitung durasi sleep (min 60 detik, max 12 jam)
                ├─ Tampilkan "SLEEP FOR X Jam Y Menit"
                ├─ Matikan OLED
                ├─ esp_task_wdt_deinit()
                ├─ esp_sleep_enable_timer_wakeup()
-               ├─ esp_deep_sleep_start()
-               └─ [safety net jika sleep gagal]
+               ├─ esp_deep_sleep_start()  ← normal: tidak return
+               └─ [Safety net jika sleep gagal]
                     ├─ esp_task_wdt_init()
                     └─ esp_task_wdt_add()
 ```
 
-### 2.3 Fase RFID Scan Handler
+### 3.3 Fase RFID Scan Handler
 ```
-[handleRFIDScan() dipanggil]
+[handleRFIDScan()]
   ├─ deselectSD() → aktifkan RFID (PIN_RFID_SS LOW)
-  ├─ uidToString() → konversi UID ke 10 digit desimal
+  ├─ uidToString() → UID ke 10 digit desimal
   ├─ Debounce: UID sama dalam 150ms → abaikan, return
-  ├─ Simpan lastUID + update lastScan timer
-  ├─ Jika OLED mati → turnOnOLED() + catat wasOledOff = true
+  ├─ Simpan lastUID + update lastScan
+  ├─ Jika OLED mati → turnOnOLED(), wasOledOff = true
   ├─ Tampilkan "RFID | [UID]" + playToneNotify()
-  ├─ kirimPresensi(rfid) → dapat message + success/fail
+  ├─ kirimPresensi(rfid) → dapat message + bool success
   ├─ Tampilkan "BERHASIL/INFO | [message]"
   ├─ playToneSuccess() atau playToneError()
-  ├─ Set rfidFeedback.active = true, catat waktu + wasOledOff
+  ├─ Set rfidFeedback { active=true, shownAt=now, wasOledOff }
   └─ PICC_HaltA() + PCD_StopCrypto1() + deaktifkan RFID
 
 [kirimPresensi()]
   ├─ isTimeValid()? → Tidak → "WAKTU INVALID", return false
-  ├─ getFormattedTimestamp() + time(nullptr)
+  ├─ getFormattedTimestamp() + time(nullptr) → currentUnixTime
   │
-  ├─ PRIORITAS 1: SD tersedia
-  │    ├─ saveToQueue()
-  │    │    ├─ isDuplicateInternal() (3 file terakhir, window 30 menit)
-  │    │    │    └─ Duplikat → return false
-  │    │    ├─ Cek currentFile penuh (≥ 25 record)
-  │    │    │    └─ Penuh → rotasi ke file berikutnya (circular 0–1999)
-  │    │    │         └─ File berikutnya berisi data → return false
-  │    │    ├─ Tulis ke CSV + file.sync()
-  │    │    ├─ cachedPendingRecords++
-  │    │    └─ saveMetadata()
+  ├─ PRIORITAS 1: sdCardAvailable = true
+  │    └─ saveToQueue(rfid, timestamp, unixTime)
+  │         ├─ Acquire SD mutex
+  │         ├─ isDuplicateInternal() — 3 file terakhir, window 30 menit
+  │         │    └─ Duplikat → release → return false
+  │         ├─ Cek currentFile penuh (≥25 record)
+  │         │    └─ Penuh → rotasi ke (currentQueueFile+1) % 2000
+  │         │         └─ File berikutnya berisi data → return false
+  │         ├─ Append ke CSV: rfid,timestamp,device_id,unix_time
+  │         ├─ file.sync() + file.close()
+  │         ├─ Release SD mutex
+  │         ├─ cachedPendingRecords++ + saveMetadata()
+  │         └─ return true
   │    ├─ BERHASIL → "DATA TERSIMPAN" / "QUEUE HAMPIR PENUH!" (≥1600 file)
-  │    └─ GAGAL
-  │         ├─ isDuplicateInternal() → "CUKUP SEKALI!"
+  │    └─ GAGAL → isDuplicateInternal() lagi
+  │         ├─ Duplikat → "CUKUP SEKALI!"
   │         └─ Bukan duplikat → "SD CARD ERROR"
   │
   ├─ PRIORITAS 2: SD tidak ada + WiFi connected
@@ -196,7 +263,7 @@ Firmware ini menangani:
   │    │    ├─ HTTP 400 → "CUKUP SEKALI!", return false
   │    │    ├─ HTTP 404 → "RFID UNKNOWN", return false
   │    │    └─ HTTP lain → "SERVER ERR X", return false
-  │    └─ Jika kirimLangsung gagal → fallback NVS
+  │    └─ Jika gagal (timeout/error) → fallback NVS
   │         ├─ nvsIsDuplicate() → "CUKUP SEKALI!"
   │         ├─ nvsSaveToBuffer() → "BUFFER X/20"
   │         └─ NVS penuh → "BUFFER PENUH!"
@@ -207,74 +274,79 @@ Firmware ini menangani:
        └─ NVS penuh → "BUFFER PENUH!"
 ```
 
-### 2.4 Fase Sync Data
+### 3.4 Fase Sync Data
 ```
-[chunkedSync() — non-blocking]
-  ├─ Syarat: SD ada + WiFi connected
+[chunkedSync() — non-blocking, background]
+  ├─ Syarat: sdCardAvailable + WiFi connected
   ├─ Satu siklus: max 5 file, max 15 detik
   ├─ Loop queue_0.csv → queue_1999.csv
-  │    ├─ File ada + record > 0
-  │    │    ├─ readQueueFile()
-  │    │    │    └─ Filter: buang record > 30 hari
-  │    │    ├─ POST bulk ke /api/presensi/sync-bulk
-  │    │    │    ├─ HTTP 200
-  │    │    │    │    ├─ Cek response per item → error → appendFailedLog()
-  │    │    │    │    └─ sd.remove(filename) + pendingCacheDirty = true
-  │    │    │    └─ Gagal → skip, coba siklus berikutnya
-  │    │    └─ WiFi putus → syncState.inProgress = false, return
-  │    └─ File kosong → sd.remove() langsung
+  │    ├─ File ada
+  │    │    ├─ countRecordsInFile() > 0 → syncQueueFile()
+  │    │    │    ├─ readQueueFile() → filter record > 30 hari
+  │    │    │    ├─ POST bulk ke /api/presensi/sync-bulk
+  │    │    │    │    ├─ HTTP 200
+  │    │    │    │    │    ├─ Per item error → appendFailedLog()
+  │    │    │    │    │    └─ sd.remove(filename) + pendingCacheDirty=true
+  │    │    │    │    └─ Gagal → skip, coba siklus berikutnya
+  │    │    │    └─ WiFi putus → syncState.inProgress=false, return
+  │    │    └─ File kosong → sd.remove() langsung
+  │    └─ yield() + esp_task_wdt_reset() per iterasi
   └─ Semua file selesai
        ├─ syncState.inProgress = false
-       ├─ refreshPendingCache()
-       └─ Jika pending = 0 → tampilkan "SYNC SELESAI!" + playToneSuccess()
+       ├─ refreshPendingCache() + saveMetadata()
+       └─ Jika pending = 0 → "SYNC SELESAI!" + playToneSuccess()
 
-[nvsSyncToServer()]
-  ├─ Syarat: NVS count > 0 + WiFi connected
-  ├─ POST bulk semua record NVS ke /api/presensi/sync-bulk
+[nvsSyncToServer() — NVS buffer, prioritas sebelum SD]
+  ├─ Syarat: nvsGetCount() > 0 + WiFi connected
+  ├─ Serialize semua record NVS ke JSON array
+  ├─ POST bulk ke /api/presensi/sync-bulk
   ├─ HTTP 200
-  │    ├─ Cek response per item → error → appendFailedLog()
+  │    ├─ Per item error → appendFailedLog()
   │    └─ Hapus semua record NVS + nvsSetCount(0)
-  └─ Gagal → biarkan, coba lagi di interval berikutnya
+  └─ Gagal → pertahankan, coba di interval berikutnya
 ```
 
-### 2.5 Fase OTA Update
+### 3.5 Fase OTA Update
 ```
-[checkOtaUpdate() — guard 3 jam]
+[checkOtaUpdate() — guard 3 jam, langsung saat boot]
   ├─ POST /api/presensi/firmware/check
   │    Body: { version: "2.2.8", device_id: "ESP32_XXYY" }
-  ├─ Response: { update: true, version: "X.X.X", url: "https://..." }
-  ├─ Simpan ke otaState
-  └─ Tampilkan "UPDATE vX.X.X TERSEDIA" + playToneNotify()
+  ├─ HTTP 200 + response { update: true, version, url }
+  │    ├─ Simpan ke otaState { updateAvailable, version, url }
+  │    └─ Tampilkan "UPDATE vX.X.X TERSEDIA" + playToneNotify()
+  └─ Tidak ada update / error → return
 
-[performOtaUpdate() — otomatis, tanpa konfirmasi]
-  ├─ Syarat: otaState.updateAvailable + WiFi + !rfidFeedback.active
+[performOtaUpdate() — otomatis, tanpa konfirmasi, by design]
+  ├─ Guard: otaState.updateAvailable + WiFi + !rfidFeedback.active
+  ├─ Tampilkan "UPDATE OTA vX.X.X" → "MENGUNDUH MOHON TUNGGU..."
   ├─ esp_task_wdt_delete() + esp_task_wdt_deinit()
-  ├─ GET binary dari otaState.url (timeout 60 detik)
+  ├─ GET binary dari otaState.url via HTTPS (timeout 60 detik)
   ├─ HTTP 200
   │    ├─ Update.begin(totalSize)
   │    │    └─ Gagal → "UPDATE GAGAL NO SPACE" → goto reinit_wdt
-  │    ├─ Stream write 1024 byte/chunk
-  │    ├─ Update.end() && isFinished()
-  │    │    ├─ BERHASIL → "UPDATE OK" → ESP.restart()
-  │    │    └─ GAGAL → "UPDATE GAGAL ERR X" → goto reinit_wdt
-  │    └─ HTTP error → "UPDATE GAGAL HTTP ERR X" → goto reinit_wdt
+  │    ├─ Stream write 1024 byte/chunk sampai selesai
+  │    └─ Update.end() && isFinished()
+  │         ├─ BERHASIL → "UPDATE OK RESTART..." → playToneSuccess() → ESP.restart()
+  │         └─ GAGAL → "UPDATE GAGAL ERR X" → goto reinit_wdt
+  ├─ HTTP error → "UPDATE GAGAL HTTP ERR X" → goto reinit_wdt
   └─ reinit_wdt:
-       ├─ esp_task_wdt_init()
-       ├─ esp_task_wdt_add()
-       └─ Reset previousDisplay (paksa redraw)
+       ├─ otaState.updateAvailable = false
+       ├─ esp_task_wdt_init() + esp_task_wdt_add()
+       └─ Reset previousDisplay (paksa redraw standby)
 ```
 
-### 2.6 Fase Manajemen Waktu
+### 3.6 Fase Manajemen Waktu
 ```
-[Hierarki sumber waktu]
-  1. NTP aktif (getLocalTime() valid, tm_year ≥ 120)
+[Hierarki sumber waktu — getTimeWithFallback()]
+  1. NTP aktif: getLocalTime() valid && tm_year ≥ 120
      └─ Sync ke: pool.ntp.org → time.google.com → id.pool.ntp.org
-        Timeout per server: 2500ms
+        Timeout per server: 2500ms, GMT offset: UTC+7
         Berhasil → simpan lastValidTime ke RTC memory
-  2. Estimasi RTC memory
-     └─ lastValidTime + (millis() - bootTime) / 1000
-        Valid maksimal 12 jam sejak sync terakhir
-  3. Tidak ada → isTimeValid() = false → presensi ditolak
+  2. Estimasi RTC memory:
+     └─ est = lastValidTime + (millis() - bootTime) / 1000
+        Valid maksimal 12 jam sejak sync terakhir (MAX_TIME_ESTIMATE_AGE)
+  3. Tidak ada sumber valid → return false
+     └─ kirimPresensi() → "WAKTU INVALID", tolak presensi
 
 [Sync periodik]
   └─ Setiap 1 jam jika WiFi connected → syncTimeWithFallback()
@@ -282,316 +354,218 @@ Firmware ini menangani:
 
 ---
 
-## 3. ARSITEKTUR SISTEM
+## 4. PERSYARATAN FUNGSIONAL
 
-### 2.1 Hardware
-| Komponen | Pin | Fungsi |
-|---|---|---|
-| ESP32-C3 Super Mini | — | Mikrokontroler utama |
-| MFRC522 (RC522) | SCK:4, MOSI:6, MISO:5, SS:7, RST:3 | RFID reader |
-| MicroSD Card | CS:1 (SPI shared) | Penyimpanan offline queue |
-| SSD1306 OLED 128×64 | SDA:8, SCL:9 | Display feedback |
-| Buzzer | PIN:10 | Feedback audio |
+### 4.1 Boot & Inisialisasi
 
-### 2.2 Lapisan Penyimpanan Data (Prioritas)
-```
-Tap Kartu
-    │
-    ├─ [1] SD Card    → Queue CSV (prioritas utama, kapasitas besar)
-    ├─ [2] NVS Buffer → Internal ESP32 (fallback jika SD tidak ada, max 20 record)
-    └─ [3] Langsung   → Server (jika SD tidak ada + WiFi tersedia)
-```
+**FR-01** — WDT diinisialisasi pertama kali di `setup()` dengan timeout 60 detik dan `trigger_panic = true`.
 
-### 2.3 Endpoint Server
-| Endpoint | Method | Fungsi |
-|---|---|---|
-| `/api/presensi/ping` | GET | Health check koneksi API |
-| `/api/presensi` | POST | Kirim presensi langsung (realtime) |
-| `/api/presensi/sync-bulk` | POST | Sinkronisasi bulk data offline |
-| `/api/presensi/firmware/check` | POST | Cek ketersediaan update OTA |
+**FR-02** — `deviceId` di-generate dari 2 byte terakhir MAC Address format `ESP32_XXYY` huruf kapital.
 
----
+**FR-03** — SD card diinisialisasi dengan `SD_SCK_MHZ(10)`. Jika berhasil, metadata dimuat dari `queue_meta.txt`. Jika metadata tidak ada, sistem mencari file queue belum penuh atau membuat baru.
 
-## 3. PERSYARATAN FUNGSIONAL
+**FR-04** — WiFi dikoneksikan dengan maksimal 20 retry × 300ms. Jika berhasil, ping API dilakukan maksimal 3 retry. Jika API OK, urutan: sync NTP → sync NVS → sync SD queue.
 
-### 3.1 Boot & Inisialisasi
+**FR-05** — Setelah init RFID, VersionReg dibaca. Nilai `0x00` atau `0xFF` memicu `ESP.restart()`.
 
-**FR-01 — Inisialisasi Hardware**
-- Sistem HARUS menginisialisasi WDT dengan timeout 60 detik saat boot
-- Sistem HARUS menginisialisasi I2C (OLED), SPI (RFID + SD), dan buzzer
-- Sistem HARUS menampilkan animasi startup dan memainkan startup melody
-- Sistem HARUS menghasilkan `deviceId` dari 2 byte terakhir MAC Address dengan format `ESP32_XXYY` (huruf kapital)
+**FR-06** — `timers.lastOtaCheck = 0` saat setup, memastikan OTA check dijalankan segera saat pertama kali WiFi terhubung.
 
-**FR-02 — Inisialisasi SD Card**
-- Sistem HARUS mencoba menginisialisasi SD card saat boot
-- Jika berhasil, sistem HARUS memuat metadata (cachedPendingRecords, currentQueueFile) dari `/queue_meta.txt`
-- Jika metadata tidak ada, sistem HARUS mencari file queue yang belum penuh atau membuat file baru
-- Jika SD tidak tersedia, sistem HARUS melanjutkan boot dalam mode tanpa SD
-- Sistem HARUS menampilkan jumlah data offline yang tersisa jika lebih dari 0
+### 4.2 Pembacaan & Pencatatan Presensi
 
-**FR-03 — Koneksi WiFi**
-- Sistem HARUS mencoba koneksi WiFi saat boot dengan maksimal 20 retry (±6 detik)
-- Sistem HARUS menampilkan progress koneksi di OLED beserta nama SSID
-- Jika berhasil, sistem HARUS melanjutkan ke ping API
-- Jika gagal, sistem HARUS masuk ke offline mode dan melanjutkan boot
+**FR-07** — RFID dipindai setiap iterasi loop dengan prioritas tertinggi. Jika ada kartu, `handleRFIDScan()` dipanggil dan loop di-return.
 
-**FR-04 — Ping API**
-- Sistem HARUS melakukan ping ke `/api/presensi/ping` maksimal 3 kali retry
-- Jika berhasil, sistem HARUS melakukan sinkronisasi waktu NTP
-- Jika gagal setelah 3 retry, sistem HARUS masuk ke offline mode
+**FR-08** — UID dikonversi ke 10 digit desimal via konversi little-endian 4 byte.
 
-**FR-05 — Inisialisasi RFID**
-- Sistem HARUS menginisialisasi modul RC522
-- Sistem HARUS membaca VersionReg setelah inisialisasi
-- Jika nilai register adalah `0x00` atau `0xFF`, sistem HARUS restart otomatis
+**FR-09** — Debounce 150ms untuk UID yang sama diterapkan sebelum proses apapun.
 
----
+**FR-10** — Presensi ditolak dengan `"WAKTU INVALID"` jika tidak ada sumber waktu valid.
 
-### 3.2 Pembacaan & Pencatatan Presensi
+**FR-11** — Jika SD tersedia, data SELALU disimpan langsung ke queue tanpa validasi jaringan (queue-first, prioritas kecepatan tap). Validasi RFID dilakukan server saat sync bulk.
 
-**FR-06 — Pembacaan Kartu RFID**
-- Sistem HARUS memindai kartu RFID di setiap iterasi loop dengan prioritas tertinggi
-- UID kartu HARUS dikonversi ke format 10 digit desimal
-- Sistem HARUS mengimplementasikan debounce 150ms untuk UID yang sama
-- Jika OLED sedang mati, sistem HARUS menyalakannya sementara saat kartu di-tap
+**FR-12** — Duplicate check dilakukan pada 3 file queue terakhir dengan window 30 menit dan batas 100 baris per file.
 
-**FR-07 — Validasi Waktu**
-- Sistem HARUS menolak pencatatan presensi jika waktu tidak valid
-- Waktu dianggap valid jika: NTP berhasil sync, ATAU estimasi dari RTC memory tidak lebih dari 12 jam sejak sync terakhir
-- Pesan yang ditampilkan jika waktu tidak valid: `"WAKTU INVALID"`
+**FR-13** — Rotasi file dilakukan saat file aktif mencapai 25 record. Rotasi dibatalkan jika file target masih berisi data belum ter-sync.
 
-**FR-08 — Pencatatan ke SD Card (Prioritas Utama)**
-- Jika SD tersedia, sistem HARUS menyimpan data ke queue CSV tanpa validasi ke server terlebih dahulu (prioritas kecepatan tap)
-- Sistem HARUS memeriksa duplikat dalam window 30 menit dari 3 file queue terakhir sebelum menyimpan
-- Jika duplikat ditemukan, sistem HARUS menampilkan `"CUKUP SEKALI!"`
-- Setiap file queue menampung maksimal 25 record dengan header `rfid,timestamp,device_id,unix_time`
-- Jika file penuh, sistem HARUS rotasi ke file berikutnya secara circular (queue_0.csv — queue_1999.csv)
-- Jika file berikutnya masih berisi data, sistem HARUS menolak penyimpanan
-- Setelah berhasil simpan, sistem HARUS menampilkan `"DATA TERSIMPAN"` atau `"QUEUE HAMPIR PENUH!"` jika jumlah file ≥ 1600
+**FR-14** — Jika SD tidak ada dan WiFi tersedia, data dikirim langsung ke `/api/presensi`. Jika gagal, data di-fallback ke NVS buffer.
 
-**FR-09 — Pencatatan Langsung ke Server (Fallback SD)**
-- Jika SD tidak tersedia dan WiFi tersambung, sistem HARUS mengirim langsung ke `/api/presensi`
-- Response HTTP 200 → tampilkan `"PRESENSI OK"`
-- Response HTTP 400 → tampilkan `"CUKUP SEKALI!"`
-- Response HTTP 404 → tampilkan `"RFID UNKNOWN"`
-- Response lain → tampilkan `"SERVER ERR [kode]"`
-- Jika pengiriman langsung gagal, sistem HARUS fallback ke NVS buffer
+**FR-15** — Jika SD tidak ada dan WiFi tidak ada, data disimpan ke NVS buffer (max 20 record).
 
-**FR-10 — Pencatatan ke NVS Buffer (Fallback Terakhir)**
-- Jika SD tidak tersedia dan WiFi tidak tersambung (atau kirim langsung gagal), sistem HARUS menyimpan ke NVS buffer
-- NVS buffer menampung maksimal 20 record
-- Sistem HARUS memeriksa duplikat NVS dalam window 30 menit sebelum menyimpan
-- Jika berhasil, tampilkan `"BUFFER X/20"`
-- Jika penuh, tampilkan `"BUFFER PENUH!"`
+**FR-16** — Setiap tap kartu SELALU menghasilkan feedback OLED + buzzer tanpa terkecuali. Feedback ditampilkan minimal 1800ms.
 
-**FR-11 — Feedback Pengguna**
-- Sistem HARUS selalu menampilkan feedback di OLED setelah setiap tap kartu tanpa terkecuali
-- Feedback HARUS disertai buzzer: 2x beep pendek untuk sukses, 3x beep untuk gagal/info
-- Feedback HARUS ditampilkan minimal 1800ms sebelum layar kembali ke standby
+### 4.3 Sinkronisasi Data
+
+**FR-17** — NVS buffer disync ke server SEBELUM SD queue (prioritas NVS lebih tinggi).
+
+**FR-18** — Chunked sync SD berjalan non-blocking: max 5 file per siklus, max 15 detik per siklus.
+
+**FR-19** — Record lebih dari 30 hari dibuang saat sync, tidak dikirim ke server.
+
+**FR-20** — Record ditolak server dicatat ke `failed_log.csv` di SD card.
+
+**FR-21** — Sync berjalan di latar belakang tanpa feedback visual atau audio ke pengguna.
+
+### 4.4 OTA Update
+
+**FR-22** — OTA check dilakukan setiap 3 jam dan langsung saat boot pertama (`lastOtaCheck = 0`).
+
+**FR-23** — OTA dieksekusi otomatis tanpa konfirmasi, hanya jika tidak ada tap RFID aktif (`!rfidFeedback.active`).
+
+**FR-24** — WDT dinonaktifkan selama proses download dan flashing OTA.
+
+**FR-25** — Jika OTA gagal, WDT diinisialisasi ulang dan sistem melanjutkan operasi normal.
+
+### 4.5 Manajemen Daya
+
+**FR-26** — OLED dimatikan jam 08:00–14:00 untuk menghemat daya baterai UPS.
+
+**FR-27** — Saat OLED mati dan ada tap kartu, OLED menyala sementara untuk feedback lalu kembali ke state jadwal.
+
+**FR-28** — Deep sleep aktif jam 18:00–05:00. Durasi dihitung tepat ke jam 05:00, min 60 detik, max 12 jam.
+
+**FR-29** — Jika ada sync berjalan saat jam sleep, sync diselesaikan dulu sebelum masuk sleep.
+
+**FR-30** — WDT dinonaktifkan sebelum `esp_deep_sleep_start()`. Safety net reinit WDT ditempatkan setelah pemanggilan tersebut untuk kondisi sleep gagal.
+
+### 4.6 Kesehatan Sistem
+
+**FR-31** — SD card di-health check setiap 30 detik via `fatType()`.
+
+**FR-32** — WiFi reconnect dicoba setiap 5 menit via state machine: IDLE → INIT → TRYING → SUCCESS/FAILED.
+
+**FR-33** — `esp_task_wdt_reset()` ditempatkan di setiap iterasi loop operasi panjang: `countAllOfflineRecords`, `isDuplicateInternal`, `initSDCard`, `saveToQueue`, `readQueueFile`, `chunkedSync`.
 
 ---
 
-### 3.3 Sinkronisasi Data
+## 5. PERSYARATAN NON-FUNGSIONAL
 
-**FR-12 — Chunked Sync SD**
-- Sistem HARUS melakukan sinkronisasi data SD ke server setiap 5 menit jika WiFi tersambung dan ada data pending
-- Satu siklus sync dibatasi maksimal 5 file dan durasi 15 detik (non-blocking)
-- Data lebih dari 30 hari HARUS dibuang, tidak dikirim ke server
-- Setelah sync berhasil, file queue HARUS dihapus dari SD
-- Sistem HARUS mencatat record yang gagal di server ke `/failed_log.csv`
+### 5.1 Performa
 
-**FR-13 — NVS Sync**
-- Sistem HARUS mencoba mensinkronisasi NVS buffer ke server setiap 5 menit jika WiFi tersambung
-- Setelah sync berhasil, seluruh record NVS HARUS dihapus
-- NVS juga HARUS disync saat reconnect WiFi berhasil
-
-**FR-14 — Sync saat Reconnect**
-- Saat WiFi berhasil tersambung kembali, sistem HARUS langsung mensinkronisasi NVS dan SD queue secara berurutan
-
----
-
-### 3.4 Manajemen Waktu
-
-**FR-15 — Sinkronisasi NTP**
-- Sistem HARUS mencoba sync NTP ke 3 server secara berurutan: `pool.ntp.org`, `time.google.com`, `id.pool.ntp.org`
-- Timeout per server: 2500ms
-- Jika berhasil, waktu HARUS disimpan ke RTC memory (`lastValidTime`)
-- Sistem HARUS melakukan periodic NTP sync setiap 1 jam
-
-**FR-16 — Fallback Waktu**
-- Jika NTP tidak tersedia, sistem HARUS menggunakan estimasi waktu dari `lastValidTime + elapsed millis()`
-- Estimasi waktu hanya valid maksimal 12 jam sejak sync NTP terakhir
-- Jika tidak ada sumber waktu valid sama sekali, presensi HARUS ditolak
-
----
-
-### 3.5 OTA Update
-
-**FR-17 — Pengecekan Firmware**
-- Sistem HARUS memeriksa ketersediaan firmware baru setiap 3 jam via `/api/presensi/firmware/check`
-- Request HARUS menyertakan versi saat ini (`2.2.8`) dan `device_id`
-- Jika ada update, sistem HARUS menampilkan notifikasi versi baru di OLED
-
-**FR-18 — Eksekusi OTA**
-- Sistem HARUS mengeksekusi update OTA secara otomatis tanpa konfirmasi (fully automatic by design)
-- OTA HARUS dijalankan hanya jika tidak ada feedback RFID aktif
-- WDT HARUS dinonaktifkan selama proses download dan flashing
-- Jika berhasil, sistem HARUS restart otomatis
-- Jika gagal, WDT HARUS diinisialisasi ulang dan sistem melanjutkan operasi normal
-
----
-
-### 3.6 Manajemen Daya
-
-**FR-19 — Deep Sleep**
-- Sistem HARUS masuk deep sleep pada jam 18:00 – 05:00 WIB
-- Durasi sleep HARUS dihitung tepat hingga jam 05:00, minimum 60 detik, maksimum 12 jam
-- Jika ada proses sync yang sedang berjalan, sistem HARUS menyelesaikannya dulu sebelum tidur
-- WDT HARUS dinonaktifkan sebelum `esp_deep_sleep_start()`
-
-**FR-20 — OLED Scheduling**
-- OLED HARUS dimatikan pada jam 08:00 – 14:00 untuk menghemat daya baterai
-- Di luar jam tersebut (dan di luar jam sleep), OLED HARUS menyala
-- Saat tap kartu dengan OLED mati, OLED HARUS menyala sementara untuk menampilkan feedback, lalu kembali ke state sesuai jadwal
-
----
-
-### 3.7 Kesehatan Sistem
-
-**FR-21 — SD Card Health Check**
-- Sistem HARUS memeriksa kesehatan SD card setiap 30 detik via `fatType()`
-- Jika SD terlepas, sistem HARUS menampilkan notifikasi dan mencoba reinisialisasi
-- Jika SD kembali terbaca, sistem HARUS menampilkan notifikasi dan memperbarui cache
-
-**FR-22 — WiFi Reconnect**
-- Sistem HARUS mencoba reconnect WiFi setiap 5 menit jika koneksi terputus
-- Timeout reconnect: 15 detik
-- Reconnect diimplementasikan sebagai state machine: IDLE → INIT → TRYING → SUCCESS/FAILED
-
-**FR-23 — Watchdog Timer**
-- WDT HARUS direset (`esp_task_wdt_reset()`) secara rutin di setiap loop dan di setiap operasi yang berpotensi lama (scan file, sync, OTA)
-
----
-
-### 3.8 Display Standby
-
-**FR-24 — Informasi Standby**
-- Saat tidak ada aktivitas, OLED HARUS menampilkan: status online/offline, jam saat ini, jumlah data pending (SD + NVS), dan kekuatan sinyal WiFi (4 bar)
-- Display HARUS diperbarui setiap 1 detik, hanya jika ada perubahan state (efisiensi)
-- Saat reconnect, OLED HARUS menampilkan `"CONNECTING..."`
-- Saat sync berjalan, OLED HARUS menampilkan `"SYNCING..."`
-
----
-
-## 4. PERSYARATAN NON-FUNGSIONAL
-
-### 4.1 Performa
-| Parameter | Nilai |
+| Metrik | Nilai |
 |---|---|
-| Waktu feedback tap kartu | < 500ms sejak kartu terdeteksi |
-| Timeout koneksi WiFi boot | ±6 detik (20 retry × 300ms) |
-| Timeout HTTP request presensi | 10 detik |
+| Tap latency (ada SD) | < 50ms |
+| Tap latency (tanpa SD, online, server OK) | < 10 detik |
+| Tap latency (tanpa SD, server down/lambat) | < 50ms (NVS) |
+| Tap latency (offline) | < 50ms (NVS) |
+| Timeout koneksi WiFi boot | ~6 detik (20×300ms) |
+| Timeout HTTP presensi langsung | 10 detik |
 | Timeout HTTP sync bulk | 30 detik |
 | Timeout OTA download | 60 detik |
-| Frekuensi scan RFID | Setiap iterasi loop (tidak ada delay tetap) |
 
-### 4.2 Kapasitas Penyimpanan
+### 5.2 Kapasitas Penyimpanan
+
 | Parameter | Nilai |
 |---|---|
-| Maksimum file queue | 2000 file |
-| Record per file queue | 25 record |
-| Total kapasitas queue | 50.000 record |
-| Ambang batas warning queue | 1600 file (80%) |
+| Max records per file queue | 25 |
+| Max file queue | 2.000 |
+| Total kapasitas queue SD | 50.000 record |
+| Ambang warning queue | 1.600 file (80%) |
 | NVS buffer | 20 record |
-| Maksimum usia data sync | 30 hari |
-| Maksimum usia estimasi waktu | 12 jam |
+| Usia maksimum data untuk sync | 30 hari |
+| Usia maksimum estimasi waktu RTC | 12 jam |
 
-### 4.3 Keamanan
-- Semua komunikasi ke server HARUS menggunakan HTTPS
-- Setiap request HARUS menyertakan header `X-API-KEY`
-- Verifikasi sertifikat SSL dinonaktifkan (`setInsecure()`) untuk kompatibilitas embedded
+### 5.3 Keamanan
 
-### 4.4 Keandalan
-- Sistem HARUS tetap berfungsi penuh tanpa koneksi WiFi (offline mode)
-- Sistem HARUS tetap berfungsi tanpa SD card (NVS fallback)
-- Data presensi TIDAK BOLEH hilang karena putus listrik (tersimpan di SD/NVS sebelum konfirmasi)
-- WDT memastikan sistem restart otomatis jika terjadi hang
+- Semua komunikasi ke server menggunakan HTTPS via `WiFiClientSecure`
+- Setiap request menyertakan header `X-API-KEY`
+- SSL certificate verification dinonaktifkan (`setInsecure()`) untuk kompatibilitas embedded
 
-### 4.5 Kompatibilitas
-- Firmware dikompilasi untuk ESP32-C3
-- Komunikasi SPI shared antara RC522 dan SD card dengan CS pin terpisah
+### 5.4 Keandalan
+
+- Sistem beroperasi penuh tanpa WiFi (offline mode)
+- Sistem beroperasi tanpa SD card (NVS fallback)
+- Data tidak hilang karena putus listrik — tersimpan di SD/NVS sebelum konfirmasi server
+- WDT memastikan restart otomatis jika sistem hang > 60 detik
+- Queue overwrite protection mencegah data belum ter-sync tertimpa
+
+### 5.5 Kompatibilitas
+
+- ESP32 Arduino Core v3.x (API `esp_task_wdt_config_t` yang digunakan)
+- SPI shared antara RC522 dan SD card dengan CS pin terpisah (SS:7, CS:1)
 - SD card diakses pada kecepatan 10MHz
 
 ---
 
-## 5. TIMING & KONSTANTA SISTEM
+## 6. TIMING & KONSTANTA SISTEM
 
 | Konstanta | Nilai | Keterangan |
 |---|---|---|
-| `DEBOUNCE_TIME` | 150ms | Jeda minimum antara dua tap UID sama |
-| `MIN_REPEAT_INTERVAL` | 1800s (30 menit) | Jeda minimum presensi sama dianggap duplikat |
-| `SYNC_INTERVAL` | 300s (5 menit) | Interval sinkronisasi SD dan NVS |
-| `TIME_SYNC_INTERVAL` | 3600s (1 jam) | Interval sync NTP periodik |
-| `RECONNECT_INTERVAL` | 300s (5 menit) | Interval coba reconnect WiFi |
+| `DEBOUNCE_TIME` | 150ms | Jeda minimum dua tap UID sama |
+| `MIN_REPEAT_INTERVAL` | 1800s (30 menit) | Window duplikat presensi |
+| `SYNC_INTERVAL` | 300s (5 menit) | Interval sync SD dan NVS |
+| `TIME_SYNC_INTERVAL` | 3600s (1 jam) | Interval NTP periodik |
+| `RECONNECT_INTERVAL` | 300s (5 menit) | Interval reconnect WiFi |
 | `RECONNECT_TIMEOUT` | 15s | Timeout satu sesi reconnect |
 | `OTA_CHECK_INTERVAL` | 10800s (3 jam) | Interval cek firmware baru |
-| `MAX_SYNC_TIME` | 15s | Durasi maksimum satu siklus chunked sync |
-| `RFID_FEEDBACK_DISPLAY_MS` | 1800ms | Durasi tampil feedback tap kartu |
-| `SD_REDETECT_INTERVAL` | 30s | Interval health check SD card |
+| `MAX_SYNC_TIME` | 15s | Durasi max satu siklus chunked sync |
+| `RFID_FEEDBACK_DISPLAY_MS` | 1800ms | Durasi tampil feedback tap |
+| `SD_REDETECT_INTERVAL` | 30s | Interval health check SD |
 | `OLED_SCHEDULE_CHECK_INTERVAL` | 60s | Interval cek jadwal OLED |
-| `MAX_OFFLINE_AGE` | 2592000s (30 hari) | Usia maksimum data yang boleh disync |
-| `MAX_TIME_ESTIMATE_AGE` | 43200s (12 jam) | Usia maksimum estimasi waktu dari RTC |
-| `WDT_TIMEOUT_SEC` | 60s | Timeout watchdog timer |
-| `SLEEP_START_HOUR` | 18:00 | Jam mulai deep sleep |
-| `SLEEP_END_HOUR` | 05:00 | Jam bangun dari deep sleep |
-| `OLED_DIM_START_HOUR` | 08:00 | Jam OLED mulai dimatikan |
-| `OLED_DIM_END_HOUR` | 14:00 | Jam OLED dinyalakan kembali |
+| `MAX_OFFLINE_AGE` | 2592000s (30 hari) | Usia max data untuk sync |
+| `MAX_TIME_ESTIMATE_AGE` | 43200s (12 jam) | Usia max estimasi waktu RTC |
+| `WDT_TIMEOUT_SEC` | 60s | Timeout watchdog |
+| `SLEEP_START_HOUR` | 18:00 | Mulai deep sleep |
+| `SLEEP_END_HOUR` | 05:00 | Bangun dari deep sleep |
+| `OLED_DIM_START_HOUR` | 08:00 | OLED mulai dimatikan |
+| `OLED_DIM_END_HOUR` | 14:00 | OLED dinyalakan kembali |
 | `GMT_OFFSET_SEC` | 25200 (UTC+7) | Offset zona waktu WIB |
 
 ---
 
-## 6. ALUR RESPONS FEEDBACK OLED
+## 7. JADWAL OPERASIONAL
 
-| Kondisi | Baris 1 | Baris 2 | Buzzer |
-|---|---|---|---|
-| Presensi berhasil disimpan ke SD | `BERHASIL` | `DATA TERSIMPAN` | 2x beep |
-| Queue hampir penuh (≥1600 file) | `BERHASIL` | `QUEUE HAMPIR PENUH!` | 2x beep |
-| Kirim langsung berhasil | `BERHASIL` | `PRESENSI OK` | 2x beep |
-| Tersimpan di NVS buffer | `BERHASIL` | `BUFFER X/20` | 2x beep |
-| Duplikat presensi | `INFO` | `CUKUP SEKALI!` | 3x beep |
-| RFID tidak dikenal (server) | `INFO` | `RFID UNKNOWN` | 3x beep |
-| Server error | `INFO` | `SERVER ERR [kode]` | 3x beep |
-| SD card error | `INFO` | `SD CARD ERROR` | 3x beep |
-| NVS buffer penuh | `INFO` | `BUFFER PENUH!` | 3x beep |
-| Waktu tidak valid | `INFO` | `WAKTU INVALID` | 3x beep |
+| Waktu | Status OLED | Status Sistem |
+|---|---|---|
+| 00:00 – 07:59 | ON | Aktif, presensi pagi |
+| 08:00 – 13:59 | OFF (hemat daya) | Aktif, OLED menyala sementara saat tap |
+| 14:00 – 17:59 | ON | Aktif, presensi sore |
+| 18:00 – 04:59 | OFF | Deep sleep |
 
 ---
 
-## 7. FITUR YANG TIDAK ADA DI VERSI INI
+## 8. TABEL FEEDBACK OLED
+
+| Kondisi | Baris 1 | Baris 2 | Buzzer |
+|---|---|---|---|
+| Simpan ke SD berhasil | `BERHASIL` | `DATA TERSIMPAN` | 2× beep |
+| Queue hampir penuh (≥1600 file) | `BERHASIL` | `QUEUE HAMPIR PENUH!` | 2× beep |
+| Kirim langsung berhasil | `BERHASIL` | `PRESENSI OK` | 2× beep |
+| Tersimpan di NVS buffer | `BERHASIL` | `BUFFER X/20` | 2× beep |
+| Duplikat presensi | `INFO` | `CUKUP SEKALI!` | 3× beep |
+| RFID tidak dikenal (server) | `INFO` | `RFID UNKNOWN` | 3× beep |
+| Server error | `INFO` | `SERVER ERR X` | 3× beep |
+| SD card error | `INFO` | `SD CARD ERROR` | 3× beep |
+| NVS buffer penuh | `INFO` | `BUFFER PENUH!` | 3× beep |
+| Waktu tidak valid | `INFO` | `WAKTU INVALID` | 3× beep |
+
+---
+
+## 9. FITUR YANG TIDAK ADA DI VERSI INI
 
 | Fitur | Keterangan | Target |
 |---|---|---|
-| Validasi RFID lokal dari SD | Download daftar RFID aktif dari server untuk validasi offline | v2.2.9 |
-| Reinit WDT setelah sleep gagal | Safety net jika `esp_deep_sleep_start()` tidak return | v2.2.9 |
+| Download & validasi RFID lokal dari SD | Download `getDatabaseUsers()` → simpan ke SD → validasi offline tanpa network call | v2.2.9 |
 | Modul fingerprint | Hardware belum tersedia | v2.3.x |
 
 ---
 
-## 8. DEPENDENSI LIBRARY
+## 10. DEPENDENSI LIBRARY
 
-| Library | Fungsi |
-|---|---|
-| `WiFi.h` | Koneksi WiFi |
-| `WiFiClientSecure.h` | HTTPS client |
-| `HTTPClient.h` | HTTP request |
-| `HTTPUpdate.h` | OTA via HTTP |
-| `Wire.h` | Komunikasi I2C |
-| `MFRC522.h` | Driver RFID RC522 |
-| `SPI.h` | Komunikasi SPI |
-| `Adafruit_SSD1306.h` | Driver OLED |
-| `ArduinoJson.h` | Parse/serialize JSON |
-| `time.h` | Manajemen waktu POSIX |
-| `SdFat.h` | Akses SD card |
-| `esp_task_wdt.h` | Watchdog timer ESP32 |
-| `Preferences.h` | NVS storage |
-| `Update.h` | OTA flash writer |
+| Library | Versi | Keterangan |
+|---|---|---|
+| MFRC522 | ≥ 1.4.10 | Driver RFID RC522 |
+| Adafruit SSD1306 | ≥ 2.5.7 | Driver OLED |
+| Adafruit GFX Library | ≥ 1.11.9 | Grafis OLED |
+| ArduinoJson | ≥ 7.x | Parse/serialize JSON |
+| SdFat | ≥ 2.2.x | Akses SD card |
+| WiFi | ESP32 core | Koneksi WiFi |
+| WiFiClientSecure | ESP32 core | HTTPS client |
+| HTTPClient | ESP32 core | HTTP request |
+| HTTPUpdate | ESP32 core | OTA via HTTP |
+| Wire | ESP32 core | I2C |
+| SPI | ESP32 core | SPI bus |
+| time.h | ESP32 core | POSIX time |
+| esp_task_wdt | ESP32 core | Watchdog timer |
+| Preferences | ESP32 core | NVS storage |
+| Update | ESP32 core | OTA flash writer |
+
+> **Catatan:** Gunakan ESP32 Arduino core v3.x. API `esp_task_wdt_init` menggunakan struct `esp_task_wdt_config_t` yang hanya tersedia di core v3.x.
