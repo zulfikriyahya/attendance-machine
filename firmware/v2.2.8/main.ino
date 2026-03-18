@@ -846,8 +846,6 @@ int countRecordsInFile(const char *filename)
     return count;
 }
 
-// [FIX WDT] Tambah esp_task_wdt_reset() di setiap iterasi loop
-// untuk mencegah WDT timeout saat memindai hingga 2000 file
 int countAllOfflineRecords()
 {
     if (!sdCardAvailable)
@@ -958,8 +956,6 @@ bool initSDCard()
 // ========================================
 // DUPLICATE CHECK
 // ========================================
-// [FIX WDT] Tambah esp_task_wdt_reset() di setiap iterasi file
-// untuk mencegah WDT timeout saat membaca beberapa file sekaligus
 bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
 {
     bool found = false;
@@ -2177,10 +2173,9 @@ void loop()
             esp_deep_sleep_start();
 
             const esp_task_wdt_config_t wdtConfig = {
-            .timeout_ms = WDT_TIMEOUT_SEC * 1000,
-            .idle_core_mask = 0,
-            .trigger_panic = true
-            };
+                .timeout_ms = WDT_TIMEOUT_SEC * 1000,
+                .idle_core_mask = 0,
+                .trigger_panic = true};
             esp_task_wdt_init(&wdtConfig);
             esp_task_wdt_add(nullptr);
         }
