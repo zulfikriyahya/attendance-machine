@@ -546,6 +546,7 @@ bool syncTimeWithFallback()
         unsigned long start = millis();
         while (millis() - start < 2500)
         {
+            esp_task_wdt_reset();
             if (getLocalTime(&timeInfo) && timeInfo.tm_year >= 120)
             {
                 lastValidTime = mktime(&timeInfo);
