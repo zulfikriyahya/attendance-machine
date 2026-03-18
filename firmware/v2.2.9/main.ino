@@ -252,7 +252,6 @@ void refreshPendingCache();
 void saveMetadata();
 void loadMetadata();
 void appendFailedLog(const char *rfid, const char *timestamp, const char *reason);
-RfidValidResult validateRfidOnline(const char *rfid);
 WiFiClientSecure &getSecureClient();
 int nvsGetCount();
 void nvsSetCount(int count);
@@ -264,6 +263,7 @@ bool nvsSyncToServer();
 bool nvsIsDuplicate(const char *rfid, unsigned long unixTime);
 void checkOtaUpdate();
 void performOtaUpdate();
+RfidValidResult validateRfidOnline(const char *rfid);
 unsigned long nvsGetRfidDbVer();
 void nvsSetRfidDbVer(unsigned long ver);
 unsigned long checkRfidDbVersion();
@@ -973,6 +973,40 @@ bool isRfidInDb(const char *rfid)
     return found;
 }
 
+RfidValidResult validateRfidOnline(const char *rfid)
+{
+    if (WiFi.status() != WL_CONNECTED)
+        return RFID_UNREACHABLE;
+
+    HTTPClient http;
+    http.setTimeout(8000);
+    http.setConnectTimeout(5000);
+
+    char url[80];
+    strcpy_P(url, API_BASE_URL);
+    strcat_P(url, PSTR("/api/presensi/validate"));
+
+    if (!http.begin(getSecureClient(), url))
+        return RFID_UNREACHABLE;
+
+    http.addHeader(F("Content-Type"), F("application/json"));
+    char apiKey[32];
+    strcpy_P(apiKey, API_SECRET_KEY);
+    http.addHeader(F("X-API-KEY"), apiKey);
+
+    char payload[32];
+    snprintf(payload, sizeof(payload), "{\"rfid\":\"%s\"}", rfid);
+
+    int code = http.POST(payload);
+    http.end();
+
+    if (code == 200)
+        return RFID_VALID;
+    if (code == 404)
+        return RFID_INVALID;
+    return RFID_UNREACHABLE;
+}
+
 void checkAndUpdateRfidDb()
 {
     if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
@@ -1404,43 +1438,6 @@ void appendFailedLog(const char *rfid, const char *timestamp, const char *reason
     }
     deselectSD();
     releaseSD();
-}
-
-// ========================================
-// RFID VALIDATION (hanya untuk kondisi tanpa SD)
-// ========================================
-RfidValidResult validateRfidOnline(const char *rfid)
-{
-    if (WiFi.status() != WL_CONNECTED)
-        return RFID_UNREACHABLE;
-
-    HTTPClient http;
-    http.setTimeout(8000);
-    http.setConnectTimeout(5000);
-
-    char url[80];
-    strcpy_P(url, API_BASE_URL);
-    strcat_P(url, PSTR("/api/presensi/validate"));
-
-    if (!http.begin(getSecureClient(), url))
-        return RFID_UNREACHABLE;
-
-    http.addHeader(F("Content-Type"), F("application/json"));
-    char apiKey[32];
-    strcpy_P(apiKey, API_SECRET_KEY);
-    http.addHeader(F("X-API-KEY"), apiKey);
-
-    char payload[32];
-    snprintf(payload, sizeof(payload), "{\"rfid\":\"%s\"}", rfid);
-
-    int code = http.POST(payload);
-    http.end();
-
-    if (code == 200)
-        return RFID_VALID;
-    if (code == 404)
-        return RFID_INVALID;
-    return RFID_UNREACHABLE;
 }
 
 // ========================================
@@ -1889,12 +1886,7 @@ bool kirimPresensi(const char *rfidUID, char *message)
                 return false;
             }
             RfidValidResult onlineResult = validateRfidOnline(rfidUID);
-            if (onlineResult == RFID_INVALID)
-            {
-                strcpy(message, "HUBUNGI ADMIN");
-                return false;
-            }
-            if (onlineResult == RFID_UNREACHABLE)
+            if (onlineResult == RFID_INVALID || onlineResult == RFID_UNREACHABLE)
             {
                 strcpy(message, "HUBUNGI ADMIN");
                 return false;
@@ -2358,7 +2350,6 @@ void setup()
                 else
                     showOLED(F("RFID DB"), "UP TO DATE");
                 delay(600);
-                timers.lastRfidDbCheck = millis();
                 esp_task_wdt_reset();
             }
         }
@@ -2516,6 +2507,13 @@ void loop()
             esp_task_wdt_deinit();
             esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
             esp_deep_sleep_start();
+
+            const esp_task_wdt_config_t wdtConfig = {
+                .timeout_ms = WDT_TIMEOUT_SEC * 1000,
+                .idle_core_mask = 0,
+                .trigger_panic = true};
+            esp_task_wdt_init(&wdtConfig);
+            esp_task_wdt_add(nullptr);
         }
     }
     yield();

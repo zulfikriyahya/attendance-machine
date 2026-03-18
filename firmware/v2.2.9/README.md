@@ -79,7 +79,7 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 - **Smart Duplicate Prevention:** Algoritma _sliding window_ yang memindai 3 indeks antrean lokal terakhir untuk menolak pemindaian kartu yang sama dalam periode waktu yang dikonfigurasi (default: 30 menit).
 - **Bulk Upload Efficiency:** Mengirimkan himpunan data dalam satu permintaan HTTP POST.
 - **Hybrid Timekeeping:** Sinkronisasi waktu menggunakan NTP saat daring, dan estimasi waktu berbasis RTC internal saat luring.
-- **Deep Sleep Scheduling:** Manajemen daya otomatis di luar jam operasional (default: 18:00–05:00).
+- **Deep Sleep Scheduling:** Manajemen daya otomatis di luar jam operasional (default: 18:00–05:00). Safety net reinit WDT ditempatkan langsung setelah `esp_deep_sleep_start()` di dalam `loop()` untuk kondisi sleep gagal.
 - **Single SSID:** Konfigurasi jaringan satu SSID dengan reconnect state machine 4 state.
 
 ### Advanced Features
