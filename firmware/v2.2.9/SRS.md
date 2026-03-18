@@ -19,7 +19,7 @@ Dokumen ini mendeskripsikan seluruh persyaratan fungsional, non-fungsional, dan 
 ### 1.2 Ruang Lingkup
 Firmware ini menangani:
 - Pembacaan kartu RFID dan pencatatan presensi
-- Validasi RFID lokal berbasis database terunduh (`rfid_db.txt`) dengan fallback online ke server
+- Validasi RFID lokal berbasis RAM cache yang dimuat dari `rfid_db.txt` saat boot — lookup O(n) di RAM tanpa akses SD card dan tanpa HTTP call, latency < 1ms
 - Penyimpanan data offline ke SD card (Queue System) dan NVS buffer internal
 - Sinkronisasi data latar belakang ke server via HTTPS (non-blocking)
 - Update firmware otomatis via OTA
@@ -33,7 +33,7 @@ Firmware ini menangani:
 |---|---|---|
 | v2.2.7 | Maret 2026 | Rilis awal sistem hybrid: Queue System + NVS Buffer, reconnect state machine, deep sleep, OLED auto dim, bulk sync chunked |
 | v2.2.8 | Maret 2026 | Tambah OTA update otomatis, perbaikan WDT coverage, hapus `validateRfidOnline()` dari alur tap SD, tambah WDT safety net setelah deep sleep, prioritas kecepatan tap queue-first |
-| v2.2.9 | Maret 2026 | Tambah RFID Local Database: download `rfid_db.txt` dari server, validasi lokal saat tap, fallback online jika tidak ditemukan di DB lokal, pembaruan DB otomatis setiap 3 jam berbasis versi timestamp |
+| v2.2.9 | Maret 2026 | Tambah RFID Local Database: download `rfid_db.txt` dari server, muat ke RAM cache saat boot, lookup O(n) di RAM saat tap tanpa akses SD/HTTP, pembaruan DB otomatis setiap 3 jam berbasis versi timestamp, free/reload cache mengikuti siklus hidup SD card |
 
 ### 1.4 Definisi dan Singkatan
 
@@ -50,6 +50,7 @@ Firmware ini menangani:
 | Queue-First | Strategi simpan ke SD langsung tanpa validasi jaringan saat tap |
 | Store-and-Forward | Data disimpan lokal, dikirim ke server saat koneksi tersedia |
 | RFID Local DB | File `rfid_db.txt` di SD card berisi daftar RFID valid yang diunduh dari server |
+| RFID RAM Cache | Array pointer `char**` di heap ESP32 berisi seluruh RFID valid, dimuat dari `rfid_db.txt` saat boot untuk lookup cepat tanpa akses SD |
 
 ### 1.5 Konteks Sistem
 - **Sumber daya:** Adaptor listrik PLN dengan baterai 1000–3000 mAh sebagai UPS
@@ -78,8 +79,8 @@ Firmware ini menangani:
 Tap Kartu
     │
     ├─ [1] SD Card (Prioritas Utama)
-    │       Validasi lokal via rfid_db.txt → Queue CSV
-    │       Max 50.000 record, queue-first
+    │       Validasi via RAM cache → Queue CSV
+    │       Max 50.000 record, queue-first, lookup < 1ms
     │
     ├─ [2] NVS Buffer (Fallback SD tidak ada)
     │       Flash internal ESP32, max 20 record, persisten
@@ -260,15 +261,10 @@ Tap Kartu
   ├─ getFormattedTimestamp() + time(nullptr) → currentUnixTime
   │
   ├─ PRIORITAS 1: sdCardAvailable = true
-  │    ├─ isRfidInDb(rfid)
-  │    │    ├─ rfid_db.txt tidak ada → izinkan (fallback, lanjut ke saveToQueue)
+  │    ├─ isRfidInCache(rfid) — lookup di RAM, O(n), < 1ms
+  │    │    ├─ Cache kosong (rfid_db.txt tidak ada) → izinkan (fallback, lanjut ke saveToQueue)
   │    │    ├─ Ditemukan → lanjut ke saveToQueue
-  │    │    └─ Tidak ditemukan
-  │    │         ├─ WiFi tidak tersambung → "HUBUNGI ADMIN", return false
-  │    │         └─ WiFi tersambung → validateRfidOnline()
-  │    │              ├─ RFID_VALID      → lanjut ke saveToQueue
-  │    │              ├─ RFID_INVALID    → "HUBUNGI ADMIN", return false
-  │    │              └─ RFID_UNREACHABLE→ "HUBUNGI ADMIN", return false
+  │    │    └─ Tidak ditemukan → "HUBUNGI ADMIN", return false
   │    └─ saveToQueue(rfid, timestamp, unixTime)
   │         ├─ Acquire SD mutex
   │         ├─ isDuplicateInternal() — 3 file terakhir, window 30 menit
@@ -319,15 +315,28 @@ Tap Kartu
   ├─ sd.remove(RFID_DB_FILE) jika ada
   ├─ sd.rename("/rfid_db.tmp", "/rfid_db.txt")
   ├─ nvsSetRfidDbVer(serverVer)
+  ├─ loadRfidCacheFromFile() → reload RAM cache
   └─ Tampilkan "RFID DB X RFID" + playToneSuccess()
 
-[isRfidInDb(rfid)]
-  ├─ SD tidak ada → return true (fallback izinkan)
-  ├─ rfid_db.txt tidak ada → return true (fallback izinkan)
-  ├─ Buka rfid_db.txt → scan linear baris per baris
+[loadRfidCacheFromFile()]
+  ├─ freeRfidCache() → free alokasi heap sebelumnya
+  ├─ Buka rfid_db.txt → hitung jumlah baris valid (10 digit)
+  ├─ malloc array pointer char** sejumlah baris valid
+  ├─ Baca ulang file → malloc 11 byte per RFID → isi array
   │    └─ esp_task_wdt_reset() per baris
-  ├─ Match ditemukan → return true
+  ├─ rfidCacheLoaded = true
+  └─ return true
+
+[isRfidInCache(rfid)]
+  ├─ Cache tidak ada/kosong → return true (fallback izinkan)
+  ├─ Loop array RAM → strcmp per entry
+  ├─ Match → return true
   └─ Tidak match → return false
+
+[freeRfidCache()]
+  ├─ Loop → free tiap pointer
+  ├─ free array utama
+  └─ rfidCacheCount = 0, rfidCacheLoaded = false
 
 [checkAndUpdateRfidDb()]
   ├─ Guard: sdCardAvailable + WiFi connected + interval 3 jam
@@ -445,13 +454,13 @@ Tap Kartu
 
 **FR-11** — Presensi ditolak dengan `"WAKTU INVALID"` jika tidak ada sumber waktu valid.
 
-**FR-12** — Jika SD tersedia, sistem melakukan validasi lokal via `isRfidInDb()` sebelum menyimpan ke queue.
+**FR-12** — Jika SD tersedia, sistem melakukan validasi via `isRfidInCache()` — lookup di RAM heap yang sudah dimuat saat boot. Tidak ada akses SD card dan tidak ada HTTP call saat tap.
 
-**FR-13** — Jika RFID tidak ditemukan di `rfid_db.txt` dan WiFi tersambung, sistem melakukan fallback ke `validateRfidOnline()` via endpoint `/api/presensi/validate`. Jika valid, tap diproses. Jika invalid atau server tidak dapat dihubungi, tap ditolak dengan pesan `"HUBUNGI ADMIN"`.
+**FR-13** — Jika RFID tidak ditemukan di cache RAM dan cache tidak kosong, tap langsung ditolak dengan pesan `"HUBUNGI ADMIN"` tanpa fallback apapun.
 
-**FR-14** — Jika `rfid_db.txt` tidak ada di SD card, `isRfidInDb()` mengembalikan `true` — semua tap diizinkan masuk ke queue (fallback).
+**FR-14** — Jika cache RAM kosong (rfid_db.txt belum pernah diunduh atau gagal dimuat), `isRfidInCache()` mengembalikan `true` — semua tap diizinkan masuk ke queue (fallback).
 
-**FR-15** — Jika RFID tidak ditemukan di DB lokal dan WiFi tidak tersambung, tap ditolak langsung dengan `"HUBUNGI ADMIN"` tanpa HTTP call.
+**FR-15** — Cache RAM dimuat dari `rfid_db.txt` saat boot setelah SD init, di-reload setelah `downloadRfidDb()` selesai, di-reload setelah SD card kembali terbaca, dan di-free saat SD card terlepas.
 
 **FR-16** — Duplicate check dilakukan pada 3 file queue terakhir dengan window 30 menit dan batas 100 baris per file.
 
@@ -475,7 +484,11 @@ Tap Kartu
 
 **FR-25** — Hanya baris yang valid (tepat 10 karakter digit) yang ditulis ke file. Baris tidak valid diabaikan.
 
-**FR-26** — `checkAndUpdateRfidDb()` dipanggil dari loop periodic check setiap 3 jam jika WiFi tersambung dan SD tersedia.
+**FR-26** — Setelah download selesai, `loadRfidCacheFromFile()` dipanggil otomatis untuk memperbarui RAM cache tanpa perlu restart.
+
+**FR-27** — `loadRfidCacheFromFile()` mengalokasikan array pointer `char**` di heap, kemudian mengalokasikan 11 byte per RFID. Total penggunaan heap untuk 2000 RFID sekitar 22KB.
+
+**FR-28** — `checkAndUpdateRfidDb()` dipanggil dari loop periodic check setiap 3 jam jika WiFi tersambung dan SD tersedia.
 
 ### 4.4 Sinkronisasi Data
 
@@ -517,7 +530,7 @@ Tap Kartu
 
 **FR-42** — WiFi reconnect dicoba setiap 5 menit via state machine: IDLE → INIT → TRYING → SUCCESS/FAILED.
 
-**FR-43** — `esp_task_wdt_reset()` ditempatkan di setiap iterasi loop operasi panjang: `countAllOfflineRecords`, `isDuplicateInternal`, `initSDCard`, `saveToQueue`, `readQueueFile`, `chunkedSync`, `downloadRfidDb` (per chunk), `isRfidInDb` (per baris).
+**FR-43** — `esp_task_wdt_reset()` ditempatkan di setiap iterasi loop operasi panjang: `countAllOfflineRecords`, `isDuplicateInternal`, `initSDCard`, `saveToQueue`, `readQueueFile`, `chunkedSync`, `downloadRfidDb` (per chunk), `loadRfidCacheFromFile` (per baris).
 
 ---
 
@@ -527,9 +540,8 @@ Tap Kartu
 
 | Metrik | Nilai |
 |---|---|
-| Tap latency (ada SD, RFID valid di DB lokal) | < 50ms |
-| Tap latency (ada SD, RFID tidak ada di DB lokal, online) | < 8 detik (fallback HTTP) |
-| Tap latency (ada SD, RFID tidak ada di DB lokal, offline) | < 50ms (langsung tolak) |
+| Tap latency (ada SD, RFID valid di cache RAM)       | < 50ms                  |
+| Tap latency (ada SD, RFID tidak ada di cache RAM)   | < 50ms (langsung tolak) |
 | Tap latency (tanpa SD, online, server OK) | < 10 detik |
 | Tap latency (tanpa SD, server down/lambat) | < 50ms (NVS) |
 | Tap latency (offline) | < 50ms (NVS) |
@@ -551,6 +563,7 @@ Tap Kartu
 | Usia maksimum data untuk sync | 30 hari |
 | Usia maksimum estimasi waktu RTC | 12 jam |
 | Estimasi ukuran rfid_db.txt (2000 RFID) | ~22KB |
+| RAM cache usage (2000 RFID)             | ~22KB heap |
 
 ### 5.3 Keamanan
 

@@ -89,6 +89,7 @@
 // ========================================
 #define RFID_DB_FILE "/rfid_db.txt"
 #define NVS_KEY_RFID_VER "rfid_db_ver"
+#define RFID_CACHE_MAX 2000
 
 // ========================================
 // SCHEDULE CONFIG
@@ -123,13 +124,6 @@ RTC_DATA_ATTR bool rtcQueueFileValid = false;
 // ========================================
 // ENUMS
 // ========================================
-enum RfidValidResult
-{
-    RFID_VALID,
-    RFID_INVALID,
-    RFID_UNREACHABLE
-};
-
 enum ReconnectState
 {
     RECONNECT_IDLE,
@@ -228,6 +222,13 @@ ReconnectState reconnectState = RECONNECT_IDLE;
 unsigned long reconnectStartTime = 0;
 
 // ========================================
+// RFID RAM CACHE
+// ========================================
+char **rfidCache = nullptr;
+int rfidCacheCount = 0;
+bool rfidCacheLoaded = false;
+
+// ========================================
 // FUNCTION DECLARATIONS
 // ========================================
 void showOLED(const __FlashStringHelper *line1, const char *line2);
@@ -263,12 +264,13 @@ bool nvsSyncToServer();
 bool nvsIsDuplicate(const char *rfid, unsigned long unixTime);
 void checkOtaUpdate();
 void performOtaUpdate();
-RfidValidResult validateRfidOnline(const char *rfid);
 unsigned long nvsGetRfidDbVer();
 void nvsSetRfidDbVer(unsigned long ver);
 unsigned long checkRfidDbVersion();
 bool downloadRfidDb();
-bool isRfidInDb(const char *rfid);
+bool loadRfidCacheFromFile();
+void freeRfidCache();
+bool isRfidInCache(const char *rfid);
 void checkAndUpdateRfidDb();
 
 // ========================================
@@ -739,7 +741,7 @@ bool nvsSyncToServer()
 }
 
 // ========================================
-// RFID LOCAL DB
+// RFID LOCAL DB + RAM CACHE
 // ========================================
 unsigned long nvsGetRfidDbVer()
 {
@@ -754,6 +756,106 @@ void nvsSetRfidDbVer(unsigned long ver)
     prefs.begin(NVS_NAMESPACE, false);
     prefs.putULong(NVS_KEY_RFID_VER, ver);
     prefs.end();
+}
+
+void freeRfidCache()
+{
+    if (rfidCache)
+    {
+        for (int i = 0; i < rfidCacheCount; i++)
+            if (rfidCache[i])
+                free(rfidCache[i]);
+        free(rfidCache);
+        rfidCache = nullptr;
+    }
+    rfidCacheCount = 0;
+    rfidCacheLoaded = false;
+}
+
+bool loadRfidCacheFromFile()
+{
+    freeRfidCache();
+
+    if (!sdCardAvailable)
+        return false;
+
+    acquireSD();
+    selectSD();
+
+    if (!sd.exists(RFID_DB_FILE))
+    {
+        deselectSD();
+        releaseSD();
+        return false;
+    }
+
+    FsFile dbFile;
+    if (!dbFile.open(RFID_DB_FILE, O_RDONLY))
+    {
+        deselectSD();
+        releaseSD();
+        return false;
+    }
+
+    int count = 0;
+    char line[12];
+    while (dbFile.fgets(line, sizeof(line)) > 0)
+    {
+        esp_task_wdt_reset();
+        int len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        if (len == 10)
+            count++;
+    }
+    dbFile.seekSet(0);
+
+    rfidCache = (char **)malloc(count * sizeof(char *));
+    if (!rfidCache)
+    {
+        dbFile.close();
+        deselectSD();
+        releaseSD();
+        return false;
+    }
+
+    int idx = 0;
+    while (dbFile.fgets(line, sizeof(line)) > 0 && idx < count)
+    {
+        esp_task_wdt_reset();
+        int len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+        if (len == 10)
+        {
+            rfidCache[idx] = (char *)malloc(11);
+            if (rfidCache[idx])
+            {
+                memcpy(rfidCache[idx], line, 11);
+                idx++;
+            }
+        }
+    }
+    dbFile.close();
+    deselectSD();
+    releaseSD();
+
+    rfidCacheCount = idx;
+    rfidCacheLoaded = true;
+    return true;
+}
+
+bool isRfidInCache(const char *rfid)
+{
+    if (!rfidCacheLoaded || rfidCacheCount == 0)
+        return true;
+
+    for (int i = 0; i < rfidCacheCount; i++)
+    {
+        if (rfidCache[i] && strcmp(rfidCache[i], rfid) == 0)
+            return true;
+    }
+    return false;
 }
 
 unsigned long checkRfidDbVersion()
@@ -923,89 +1025,15 @@ bool downloadRfidDb()
     if (serverVer > 0)
         nvsSetRfidDbVer(serverVer);
 
+    // Reload RAM cache dari file baru
+    loadRfidCacheFromFile();
+
     char buf[20];
     snprintf(buf, sizeof(buf), "%d RFID", written);
     showOLED(F("RFID DB"), buf);
     playToneSuccess();
     delay(800);
     return true;
-}
-
-bool isRfidInDb(const char *rfid)
-{
-    if (!sdCardAvailable)
-        return true;
-
-    acquireSD();
-    selectSD();
-
-    if (!sd.exists(RFID_DB_FILE))
-    {
-        deselectSD();
-        releaseSD();
-        return true;
-    }
-
-    FsFile dbFile;
-    if (!dbFile.open(RFID_DB_FILE, O_RDONLY))
-    {
-        deselectSD();
-        releaseSD();
-        return true;
-    }
-
-    char line[12];
-    bool found = false;
-    while (dbFile.fgets(line, sizeof(line)) > 0)
-    {
-        esp_task_wdt_reset();
-        int len = strlen(line);
-        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-            line[--len] = '\0';
-        if (strcmp(line, rfid) == 0)
-        {
-            found = true;
-            break;
-        }
-    }
-    dbFile.close();
-    deselectSD();
-    releaseSD();
-    return found;
-}
-
-RfidValidResult validateRfidOnline(const char *rfid)
-{
-    if (WiFi.status() != WL_CONNECTED)
-        return RFID_UNREACHABLE;
-
-    HTTPClient http;
-    http.setTimeout(8000);
-    http.setConnectTimeout(5000);
-
-    char url[80];
-    strcpy_P(url, API_BASE_URL);
-    strcat_P(url, PSTR("/api/presensi/validate"));
-
-    if (!http.begin(getSecureClient(), url))
-        return RFID_UNREACHABLE;
-
-    http.addHeader(F("Content-Type"), F("application/json"));
-    char apiKey[32];
-    strcpy_P(apiKey, API_SECRET_KEY);
-    http.addHeader(F("X-API-KEY"), apiKey);
-
-    char payload[32];
-    snprintf(payload, sizeof(payload), "{\"rfid\":\"%s\"}", rfid);
-
-    int code = http.POST(payload);
-    http.end();
-
-    if (code == 200)
-        return RFID_VALID;
-    if (code == 404)
-        return RFID_INVALID;
-    return RFID_UNREACHABLE;
 }
 
 void checkAndUpdateRfidDb()
@@ -1110,6 +1138,7 @@ void checkSDHealth()
             showOLED(F("SD CARD"), "TERBACA KEMBALI");
             playToneSuccess();
             delay(800);
+            loadRfidCacheFromFile();
         }
         return;
     }
@@ -1123,6 +1152,7 @@ void checkSDHealth()
     if (!healthy)
     {
         sdCardAvailable = false;
+        freeRfidCache();
         showOLED(F("SD CARD"), "TERLEPAS!");
         playToneError();
         delay(800);
@@ -1879,19 +1909,10 @@ bool kirimPresensi(const char *rfidUID, char *message)
 
     if (sdCardAvailable)
     {
-        if (!isRfidInDb(rfidUID))
+        if (!isRfidInCache(rfidUID))
         {
-            if (WiFi.status() != WL_CONNECTED)
-            {
-                strcpy(message, "HUBUNGI ADMIN");
-                return false;
-            }
-            RfidValidResult onlineResult = validateRfidOnline(rfidUID);
-            if (onlineResult == RFID_INVALID || onlineResult == RFID_UNREACHABLE)
-            {
-                strcpy(message, "HUBUNGI ADMIN");
-                return false;
-            }
+            strcpy(message, "HUBUNGI ADMIN");
+            return false;
         }
 
         if (saveToQueue(rfidUID, timestamp, currentUnixTime))
@@ -2271,6 +2292,15 @@ void setup()
             snprintf(buf, sizeof(buf), "%d TERSISA", cachedPendingRecords);
             showOLED(F("DATA OFFLINE"), buf);
             delay(1000);
+        }
+        // Load RFID cache ke RAM dari file yang sudah ada
+        showProgress(F("LOAD RFID DB"), 500);
+        if (loadRfidCacheFromFile())
+        {
+            char buf[20];
+            snprintf(buf, sizeof(buf), "%d RFID", rfidCacheCount);
+            showOLED(F("RFID DB"), buf);
+            delay(600);
         }
     }
     else
