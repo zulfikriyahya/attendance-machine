@@ -75,11 +75,11 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 - **Offline-First Capability:** Prioritas penyimpanan data lokal saat jaringan tidak tersedia atau tidak stabil.
 - **Partitioned Queue System:** Manajemen memori tingkat lanjut yang memecah penyimpanan data menjadi berkas-berkas kecil untuk mencegah _buffer overflow_.
 - **NVS Buffer:** Penyimpanan fallback di flash internal ESP32 untuk kondisi tanpa SD card. Kapasitas 20 record, persisten melewati restart dan deep sleep.
-- **Local RFID Database:** Database RFID valid diunduh dari server dan disimpan di SD card (`rfid_db.txt`). Validasi dilakukan lokal tanpa panggilan jaringan saat tap. Database diperbarui otomatis setiap 3 jam jika ada perubahan di server (berbasis perbandingan versi timestamp).
+- **Local RFID Database:** Database RFID valid diunduh dari server dan disimpan di SD card (`rfid_db.txt`). Saat boot, seluruh daftar RFID dimuat ke RAM (heap) sebagai array pointer. Validasi saat tap dilakukan di RAM — tanpa akses SD card, tanpa HTTP call — sehingga latency tap tetap < 50ms baik online maupun offline. Database diperbarui otomatis setiap 3 jam jika ada perubahan di server (berbasis perbandingan versi timestamp).
 - **Smart Duplicate Prevention:** Algoritma _sliding window_ yang memindai 3 indeks antrean lokal terakhir untuk menolak pemindaian kartu yang sama dalam periode waktu yang dikonfigurasi (default: 30 menit).
 - **Bulk Upload Efficiency:** Mengirimkan himpunan data dalam satu permintaan HTTP POST.
 - **Hybrid Timekeeping:** Sinkronisasi waktu menggunakan NTP saat daring, dan estimasi waktu berbasis RTC internal saat luring.
-- **Deep Sleep Scheduling:** Manajemen daya otomatis di luar jam operasional (default: 18:00–05:00).
+- **Deep Sleep Scheduling:** Manajemen daya otomatis di luar jam operasional (default: 18:00–05:00). Safety net reinit WDT ditempatkan langsung setelah `esp_deep_sleep_start()` di dalam `loop()` untuk kondisi sleep gagal.
 - **Single SSID:** Konfigurasi jaringan satu SSID dengan reconnect state machine 4 state.
 
 ### Advanced Features
@@ -169,8 +169,9 @@ const int WDT_TIMEOUT_SEC = 60;
 1. **Download:** Saat boot (jika online dan SD tersedia), perangkat membandingkan versi database lokal (disimpan di NVS key `rfid_db_ver`) dengan versi di server via endpoint `/api/presensi/rfid-list/version`. Jika server lebih baru, download dilakukan.
 2. **Format:** Server mengembalikan plain text. Baris pertama berformat `ver:{timestamp}`, baris berikutnya satu RFID per baris (10 digit angka). Total ukuran untuk 2000 RFID sekitar 22KB.
 3. **Streaming Write:** Download ditulis langsung ke SD card per chunk tanpa memuat seluruh response ke heap. File ditulis ke `/rfid_db.tmp` lalu di-rename ke `/rfid_db.txt` setelah selesai untuk menghindari file korup jika download terputus.
-4. **Validasi saat Tap:** Fungsi `isRfidInDb()` melakukan scan linear pada `/rfid_db.txt`. Jika RFID ditemukan, tap langsung diproses. Jika tidak ditemukan, sistem melakukan fallback ke server (jika online) via `validateRfidOnline()`. Jika server mengonfirmasi valid, tap diproses; jika invalid atau server tidak dapat dihubungi, tap ditolak dengan pesan `HUBUNGI ADMIN`.
-5. **Fallback DB tidak ada:** Jika `/rfid_db.txt` belum ada atau SD tidak tersedia, `isRfidInDb()` mengembalikan `true` — semua tap diizinkan masuk ke queue, validasi diserahkan ke server saat sync.
+4. **Validasi saat Tap:** Lookup dilakukan di RAM via `isRfidInCache()` — tanpa akses SD card dan tanpa HTTP call. Jika RFID tidak ditemukan di cache RAM, tap langsung ditolak dengan pesan `HUBUNGI ADMIN`.
+5. **Fallback DB tidak ada:** Jika `rfid_db.txt` belum ada atau gagal dimuat ke RAM, `isRfidInCache()` mengembalikan `true` — semua tap diizinkan masuk ke queue, validasi diserahkan ke server saat sync.
+6. **Siklus hidup cache RAM:** Cache dimuat saat boot setelah SD init, di-reload setelah download DB baru, di-reload setelah SD card kembali terbaca, dan di-free saat SD card terlepas.
 6. **Pembaruan Berkala:** Setiap 3 jam, `checkAndUpdateRfidDb()` dipanggil dari loop. Cek versi dilakukan terlebih dahulu; download hanya dilakukan jika versi server lebih baru dari versi lokal.
 
 ## Mekanisme OTA Update
@@ -208,15 +209,10 @@ Startup Animation
 ```
 RFID terbaca
     └─ Ada SD card?
-        ├─ Ya → isRfidInDb()
-        │       ├─ rfid_db.txt tidak ada → izinkan (fallback)
-        │       ├─ RFID ditemukan → simpan ke queue SD ✓
-        │       └─ RFID tidak ditemukan
-        │               ├─ Offline → tolak (HUBUNGI ADMIN) ✗
-        │               └─ Online → validateRfidOnline()
-        │                           ├─ Valid → simpan ke queue SD ✓
-        │                           ├─ Invalid → tolak (HUBUNGI ADMIN) ✗
-        │                           └─ Unreachable → tolak (HUBUNGI ADMIN) ✗
+        ├─ Ya → isRfidInCache() — lookup di RAM, < 1ms
+        │       ├─ Cache kosong/tidak ada → izinkan (fallback)
+        │       ├─ Ditemukan → simpan ke queue SD ✓
+        │       └─ Tidak ditemukan → tolak (HUBUNGI ADMIN) ✗
         └─ Tidak ada SD
             ├─ Online → kirimLangsung() ke API
             │   ├─ Berhasil → selesai
@@ -229,6 +225,11 @@ RFID terbaca
 ### RFID DB Update Flow
 
 ```
+Boot
+    └─ initSDCard() selesai → loadRfidCacheFromFile()
+        ├─ rfid_db.txt ada → muat ke RAM heap → tampil "X RFID"
+        └─ rfid_db.txt tidak ada → cache kosong (fallback izinkan)
+
 Boot / Loop (setiap 3 jam)
     └─ checkAndUpdateRfidDb()
         ├─ Tidak online atau tidak ada SD → skip
@@ -238,9 +239,11 @@ Boot / Loop (setiap 3 jam)
         │       ├─ Streaming write ke /rfid_db.tmp
         │       ├─ Rename tmp → /rfid_db.txt
         │       ├─ Simpan versi baru ke NVS
-        │       ├─ Sukses → OLED tampil jumlah RFID + tone success
-        │       └─ Gagal  → OLED tampil "GAGAL UNDUH" + tone error
-        └─ Update lastRfidDbCheck
+        │       ├─ loadRfidCacheFromFile() → reload RAM cache
+        │       └─ Tampil jumlah RFID + tone success
+
+SD Card Terlepas → freeRfidCache() → cache dikosongkan
+SD Card Kembali  → loadRfidCacheFromFile() → cache dimuat ulang
 ```
 
 ### OTA Update Flow
@@ -451,6 +454,9 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 | Check saat boot        | Ya                                        |
 | Download method        | Streaming chunk, tanpa heap buffer penuh  |
 | Atomicity              | Tulis ke `.tmp` lalu rename               |
+| RAM cache              | Array pointer `char**` di heap, dimuat saat boot |
+| RAM usage (2000 RFID)  | ~22KB heap                                |
+| Lookup method          | Scan linear di RAM, O(n), < 1ms           |
 | Fallback jika tidak ada | Izinkan semua tap                        |
 | Pesan tolak            | `HUBUNGI ADMIN`                           |
 
@@ -491,10 +497,8 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 
 | Metrik                  | Nilai                              |
 | :---------------------- | :--------------------------------- |
-| Tap Latency (Ada SD, RFID valid di DB lokal)     | < 50ms (lookup lokal + tulis SD)          |
-| Tap Latency (Ada SD, RFID tidak ada di DB, online) | < 8 detik (fallback HTTP ke server)     |
-| Tap Latency (Ada SD, RFID tidak ada di DB, offline) | < 50ms (langsung tolak)               |
-| Tap Latency (Ada SD, RFID invalid)               | < 50ms (lookup lokal, tolak)              |
+| Tap Latency (Ada SD, RFID valid di cache RAM)      | < 50ms (lookup RAM + tulis SD)           |
+| Tap Latency (Ada SD, RFID tidak ada di cache RAM)  | < 50ms (lookup RAM, langsung tolak)      |
 | Tap Latency (Tanpa SD, online, server OK) | < 10 detik              |
 | Tap Latency (Tanpa SD, server down/lambat) | < 50ms (NVS)           |
 | Tap Latency (Tanpa SD, offline) | < 50ms (NVS)                 |
@@ -524,7 +528,7 @@ Cek koneksi server. NVS hanya dihapus jika server merespons HTTP 200. Jika serve
 NVS buffer (20 record) penuh dan server belum bisa dihubungi. Pastikan koneksi WiFi dan server dalam kondisi baik. Data akan otomatis disync dan slot NVS dikosongkan saat server kembali online.
 
 **Masalah: Tap ditolak dengan pesan HUBUNGI ADMIN**
-RFID kartu tidak ditemukan di `rfid_db.txt` dan tidak dapat divalidasi ke server. Jika kartu baru saja didaftarkan, tunggu maksimal 3 jam hingga DB lokal diperbarui otomatis, atau restart perangkat untuk memaksa download saat boot. Jika online, sistem sudah otomatis fallback validasi ke server — pastikan server dapat diakses dan kartu memang sudah terdaftar.
+RFID kartu tidak ditemukan di cache RAM. Pastikan kartu sudah didaftarkan di server dan database lokal sudah diperbarui. DB diperbarui otomatis setiap 3 jam, atau restart perangkat untuk memaksa download saat boot. Setelah download selesai, cache RAM langsung diperbarui tanpa perlu restart.
 
 **Masalah: rfid_db.txt tidak terunduh meski online**
 Cek endpoint `/api/presensi/rfid-list/version` dan `/api/presensi/rfid-list` dapat diakses dengan header `X-API-KEY` yang benar. Pastikan SD card tersedia dan tidak penuh.
