@@ -8,22 +8,6 @@
  * Updated : Maret 2026
  * Version : 2.2.11
  * ======================================================================================
- *
- * Changelog v2.2.11:
- * - [Fix #1] Unsigned subtraction wraparound di nvsIsDuplicate(): tambah guard
- *            unixTime >= rec.unixTime sebelum subtraction
- * - [Fix #3] OTA rollback: tambah esp_ota_mark_app_valid_cancel_rollback() di setup()
- *            setelah sistem berhasil boot normal
- * - [Fix #4] Validasi digit konsisten di loadRfidCacheFromFile(): tambah loop
- *            isdigit() pada pass 1 dan pass 2, sama seperti downloadRfidDb()
- * - [Fix #5] Eliminasi duplikasi logika isTimeValid(): refactor menjadi satu baris
- *            yang memanggil getTimeWithFallback()
- * - [Fix #6] Race condition NVS delete: nvsSetCount(0) dipanggil sebelum loop delete
- * - [Fix #7] Pesan error queue penuh: saveToQueue() kini mengembalikan enum
- *            SaveResult, kirimPresensi() membedakan QUEUE_FULL vs SD_ERROR
- * - [Fix #8] MAX_DUPLICATE_CHECK_LINES diganti menjadi MAX_RECORDS_PER_FILE + 1
- * - [Fix #9] Komentar eksplisit urutan kritis lapis timekeeping di setup()
- * ======================================================================================
  */
 
 #include <WiFi.h>
@@ -40,7 +24,7 @@
 #include <esp_task_wdt.h>
 #include <Preferences.h>
 #include <Update.h>
-#include <esp_ota_ops.h> // [Fix #3] untuk OTA rollback
+#include <esp_ota_ops.h>
 
 // ========================================
 // BUILD MODE
@@ -89,7 +73,6 @@
 #define MAX_RECORDS_PER_FILE 25
 #define MAX_QUEUE_FILES 2000
 #define MAX_SYNC_FILES_PER_CYCLE 5
-// [Fix #8] MAX_DUPLICATE_CHECK_LINES sekarang relevan: +1 untuk baris header CSV
 #define MAX_DUPLICATE_CHECK_LINES (MAX_RECORDS_PER_FILE + 1)
 #define QUEUE_WARN_THRESHOLD 1600
 #define METADATA_FILE "/queue_meta.txt"
@@ -163,13 +146,12 @@ enum ReconnectState
     RECONNECT_FAILED
 };
 
-// [Fix #7] Enum hasil saveToQueue untuk membedakan jenis kegagalan
 enum SaveResult
 {
     SAVE_OK,
     SAVE_DUPLICATE,
-    SAVE_QUEUE_FULL, // semua 2000 slot terpakai, tidak bisa rotasi
-    SAVE_SD_ERROR    // error akses SD card
+    SAVE_QUEUE_FULL,
+    SAVE_SD_ERROR
 };
 
 // ========================================
@@ -312,7 +294,7 @@ bool loadRfidCacheFromFile();
 void freeRfidCache();
 bool isRfidInCache(const char *rfid);
 void checkAndUpdateRfidDb();
-SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime); // [Fix #7]
+SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime);
 
 // ========================================
 // SD MUTEX
@@ -555,8 +537,6 @@ void checkOLEDSchedule()
 // TIME
 // ========================================
 
-// [Fix #5] isTimeValid() tidak lagi menduplikasi logika getTimeWithFallback().
-// Cukup delegate ke getTimeWithFallback() — satu sumber kebenaran.
 bool isTimeValid()
 {
     struct tm timeInfo;
@@ -700,8 +680,6 @@ void nvsDeleteRecord(int index)
     prefs.end();
 }
 
-// [Fix #1] Tambah guard unixTime >= rec.unixTime sebelum unsigned subtraction
-// untuk mencegah wraparound jika waktu sistem melompat mundur setelah recovery NVS.
 bool nvsIsDuplicate(const char *rfid, unsigned long unixTime)
 {
     int count = nvsGetCount();
@@ -741,8 +719,6 @@ bool nvsSaveToBuffer(const char *rfid, const char *timestamp, unsigned long unix
     return true;
 }
 
-// [Fix #6] nvsSetCount(0) dipanggil SEBELUM loop delete.
-// Mencegah kondisi count tidak konsisten jika WDT reset terjadi di tengah iterasi delete.
 bool nvsSyncToServer()
 {
     int count = nvsGetCount();
@@ -804,8 +780,6 @@ bool nvsSyncToServer()
             }
         }
 
-        // [Fix #6] Reset count SEBELUM delete supaya jika ada tap baru masuk
-        // setelah baris ini, nvsGetCount() sudah 0 dan slot mulai dari awal.
         nvsSetCount(0);
         for (int i = 0; i < count; i++)
             nvsDeleteRecord(i);
@@ -848,8 +822,6 @@ void freeRfidCache()
     rfidCacheLoaded = false;
 }
 
-// [Fix #4] Validasi digit ditambahkan pada pass 1 dan pass 2,
-// konsisten dengan logika di downloadRfidDb().
 bool loadRfidCacheFromFile()
 {
     freeRfidCache();
@@ -875,7 +847,6 @@ bool loadRfidCacheFromFile()
         return false;
     }
 
-    // Pass 1: hitung baris valid (10 karakter digit)
     int count = 0;
     char line[12];
     while (dbFile.fgets(line, sizeof(line)) > 0)
@@ -886,7 +857,6 @@ bool loadRfidCacheFromFile()
             line[--len] = '\0';
         if (len == 10)
         {
-            // [Fix #4] Validasi semua karakter harus digit
             bool allDigit = true;
             for (int j = 0; j < 10; j++)
                 if (!isdigit((unsigned char)line[j]))
@@ -909,7 +879,6 @@ bool loadRfidCacheFromFile()
         return false;
     }
 
-    // Pass 2: isi data (validasi digit diulang untuk konsistensi)
     int idx = 0;
     while (dbFile.fgets(line, sizeof(line)) > 0 && idx < count)
     {
@@ -919,7 +888,6 @@ bool loadRfidCacheFromFile()
             line[--len] = '\0';
         if (len == 10)
         {
-            // [Fix #4] Validasi ulang digit sebelum masuk ke heap
             bool allDigit = true;
             for (int j = 0; j < 10; j++)
                 if (!isdigit((unsigned char)line[j]))
@@ -1415,7 +1383,6 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
         if (file.available())
             file.fgets(line, sizeof(line));
         int linesRead = 0;
-        // [Fix #8] MAX_DUPLICATE_CHECK_LINES kini = MAX_RECORDS_PER_FILE + 1
         while (file.fgets(line, sizeof(line)) > 0 && linesRead < MAX_DUPLICATE_CHECK_LINES)
         {
             esp_task_wdt_reset();
@@ -1446,7 +1413,6 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
 
 // ========================================
 // SAVE TO QUEUE
-// [Fix #7] Return type diubah dari bool ke SaveResult enum
 // ========================================
 SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime)
 {
@@ -1506,7 +1472,6 @@ SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long un
             {
                 deselectSD();
                 releaseSD();
-                // [Fix #7] Kembalikan SAVE_QUEUE_FULL, bukan SAVE_SD_ERROR
                 return SAVE_QUEUE_FULL;
             }
             sd.remove(nextFilename);
@@ -1999,8 +1964,6 @@ bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
     return false;
 }
 
-// [Fix #7] kirimPresensi() kini membaca SaveResult enum dari saveToQueue()
-// dan menampilkan pesan yang akurat: QUEUE PENUH vs SD CARD ERROR.
 bool kirimPresensi(const char *rfidUID, char *message)
 {
     if (!isTimeValid())
@@ -2036,7 +1999,6 @@ bool kirimPresensi(const char *rfidUID, char *message)
             return false;
 
         case SAVE_QUEUE_FULL:
-            // [Fix #7] Pesan spesifik untuk queue penuh, bukan SD CARD ERROR
             strcpy(message, "QUEUE PENUH!");
             return false;
 
@@ -2377,10 +2339,6 @@ void setup()
     esp_task_wdt_init(&wdtConfig);
     esp_task_wdt_add(nullptr);
 
-    // [Fix #3] Tandai firmware aktif sebagai valid untuk mencegah rollback otomatis.
-    // Harus dipanggil sedini mungkin di setup() sebelum ada potensi crash.
-    // Jika firmware baru crash sebelum baris ini tercapai, bootloader akan
-    // otomatis rollback ke firmware sebelumnya.
     esp_ota_mark_app_valid_cancel_rollback();
 
     Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
@@ -2397,28 +2355,14 @@ void setup()
     for (int i = 0; deviceId[i]; i++)
         deviceId[i] = toupper(deviceId[i]);
 
-    // ----------------------------------------
-    // RECOVERY WAKTU — URUTAN KRITIS, JANGAN DIUBAH
-    // ----------------------------------------
-    // [Fix #9] Komentar eksplisit dependency urutan lapis 1 dan 2.
-    //
-    // LAPIS 2 HARUS DIEKSEKUSI SEBELUM LAPIS 3.
-    // Alasan: jika sleepDurationSeconds > 0 (bangun dari deep sleep),
-    // lastValidTime harus dikompensasi dulu ke nilai terbaru sebelum
-    // disimpan ke NVS. Jika lapis 3 jalan lebih dulu dan membaca NVS
-    // (yang belum dikompensasi), lastValidTime akan salah.
-    //
-    // Lapis 2: Bangun dari deep sleep — kompensasi millis() reset
     if (timeWasSynced && lastValidTime > 0 && sleepDurationSeconds > 0)
     {
         lastValidTime += (time_t)sleepDurationSeconds;
-        nvsSaveLastTime(lastValidTime); // simpan nilai terkompensasi ke NVS
+        nvsSaveLastTime(lastValidTime);
         bootTime = millis();
         bootTimeSet = true;
         sleepDurationSeconds = 0;
     }
-    // Lapis 3: Reset paksa / power putus — RTC RAM hilang, pulihkan dari NVS flash
-    // (hanya berlaku jika lapis 2 tidak aktif, yaitu bukan bangun dari deep sleep)
     if (!timeWasSynced || lastValidTime == 0)
     {
         time_t saved = nvsLoadLastTime();
