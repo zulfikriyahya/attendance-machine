@@ -36,7 +36,7 @@ Firmware ini menangani:
 | v2.2.8 | Maret 2026 | Tambah OTA update otomatis, perbaikan WDT coverage, hapus `validateRfidOnline()` dari alur tap SD, tambah WDT safety net setelah deep sleep, prioritas kecepatan tap queue-first |
 | v2.2.9 | Maret 2026 | Tambah RFID Local Database: download `rfid_db.txt` dari server, muat ke RAM cache saat boot, lookup O(n) di RAM saat tap tanpa akses SD/HTTP, pembaruan DB otomatis setiap 3 jam berbasis versi timestamp, free/reload cache mengikuti siklus hidup SD card |
 | v2.2.10 | Maret 2026 | Tambah recovery waktu dua mekanisme: (1) kompensasi `lastValidTime` dengan `sleepDurationSeconds` setelah bangun dari deep sleep karena `millis()` reset ke 0, (2) restore `lastValidTime` dari NVS flash saat RTC RAM hilang akibat reset paksa atau power putus; `nvsSaveLastTime()` kini dipanggil setiap kali NTP sync berhasil |
-| v2.2.11 | Maret 2026 | Bug fixes: (1) Guard `unixTime >= rec.unixTime` di `nvsIsDuplicate()` untuk mencegah unsigned subtraction wraparound; (2) OTA rollback protection: `esp_ota_mark_app_valid_cancel_rollback()` dipanggil di awal `setup()`; (3) Validasi digit konsisten di `loadRfidCacheFromFile()` — loop `isdigit()` ditambahkan di pass 1 dan pass 2; (4) Eliminasi duplikasi logika `isTimeValid()` — didelegasikan ke `getTimeWithFallback()`; (5) Race condition NVS delete: `nvsSetCount(0)` dipanggil sebelum loop delete; (6) `saveToQueue()` kini mengembalikan enum `SaveResult`, `kirimPresensi()` membedakan `QUEUE_FULL` vs `SD_ERROR`; (7) `MAX_DUPLICATE_CHECK_LINES` diganti menjadi `MAX_RECORDS_PER_FILE + 1`; (8) Komentar eksplisit dependency urutan kritis lapis timekeeping di `setup()` |
+| v2.2.11 | Maret 2026 | Bug fixes: (1) Guard `unixTime >= rec.unixTime` di `nvsIsDuplicate()` untuk mencegah unsigned subtraction wraparound; (2) OTA rollback protection: `esp_ota_mark_app_valid_cancel_rollback()` dipanggil di awal `setup()`; (3) Validasi digit konsisten di `loadRfidCacheFromFile()` — loop `isdigit()` ditambahkan di pass 1 dan pass 2; (4) Eliminasi duplikasi logika `isTimeValid()` — didelegasikan ke `getTimeWithFallback()`; (5) Race condition NVS delete: `nvsSetCount(0)` dipanggil sebelum loop delete; (6) `saveToQueue()` kini mengembalikan enum `SaveResult`, `kirimPresensi()` membedakan `QUEUE_FULL` vs `SD_ERROR`; (7) `MAX_DUPLICATE_CHECK_LINES` diganti menjadi `MAX_RECORDS_PER_FILE + 1`; (8) Komentar eksplisit dependency urutan kritis lapis timekeeping di `setup()`; (9) Fix restart saat NTP sync di jaringan tanpa internet: `configTime()` dipanggil sekali dengan 3 server sekaligus, polling digabung dalam satu window 7500ms — mencegah repeated `configTime()` call yang dapat memicu SNTP stack panic dan menghindari WDT timeout akibat DNS hang |
 
 ### 1.4 Definisi dan Singkatan
 
@@ -372,8 +372,10 @@ Tap Kartu
 ```
 [Hierarki sumber waktu — getTimeWithFallback()]
   1. NTP aktif: getLocalTime() valid && tm_year ≥ 120
-     └─ Sync ke: pool.ntp.org → time.google.com → id.pool.ntp.org
-        Timeout per server: 2500ms, GMT offset: UTC+7
+     └─ Sync ke: pool.ntp.org, time.google.com, id.pool.ntp.org
+        configTime() dipanggil SEKALI dengan 3 server sekaligus.
+        Polling dalam satu window 7500ms dengan esp_task_wdt_reset() per iterasi.
+        GMT offset: UTC+7
         Berhasil → simpan lastValidTime ke RTC memory
                  → nvsSaveLastTime() ke NVS flash (ketahanan reset paksa)
   2. Estimasi RTC memory:
