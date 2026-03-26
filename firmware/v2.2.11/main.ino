@@ -29,7 +29,7 @@
 // ========================================
 // BUILD MODE
 // ========================================
-#define DEV_MODE // Comment baris ini untuk production
+#define DEV_MODE
 
 // ========================================
 // PIN DEFINITIONS
@@ -346,7 +346,7 @@ WiFiClientSecure &getHttpClient()
 // ========================================
 void checkOtaUpdate()
 {
-    if (WiFi.status() != WL_CONNECTED)
+    if (isSignalWeak())
         return;
     if (millis() - timers.lastOtaCheck < OTA_CHECK_INTERVAL)
         return;
@@ -411,7 +411,7 @@ void performOtaUpdate()
 {
     if (!otaState.updateAvailable)
         return;
-    if (WiFi.status() != WL_CONNECTED)
+    if (isSignalWeak())
         return;
 
     char buf[20];
@@ -575,6 +575,9 @@ void getFormattedTimestamp(char *buf, size_t bufSize)
 
 bool syncTimeWithFallback()
 {
+    if (isSignalWeak())
+        return false;
+
     const char *servers[] = {NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3};
     for (int i = 0; i < 3; i++)
     {
@@ -613,7 +616,7 @@ void periodicTimeSync()
     if (millis() - timers.lastTimeSync < TIME_SYNC_INTERVAL)
         return;
     timers.lastTimeSync = millis();
-    if (WiFi.status() == WL_CONNECTED)
+    if (!isSignalWeak())
         syncTimeWithFallback();
 }
 
@@ -727,7 +730,7 @@ bool nvsSyncToServer()
     int count = nvsGetCount();
     if (count == 0)
         return true;
-    if (WiFi.status() != WL_CONNECTED)
+    if (isSignalWeak())
         return false;
 
     HTTPClient http;
@@ -769,6 +772,7 @@ bool nvsSyncToServer()
     if (code == 200)
     {
         String body = http.getString();
+        esp_task_wdt_reset();
         http.end();
 
         DynamicJsonDocument res(4096);
@@ -933,7 +937,7 @@ bool isRfidInCache(const char *rfid)
 
 unsigned long checkRfidDbVersion()
 {
-    if (WiFi.status() != WL_CONNECTED)
+    if (isSignalWeak())
         return 0;
 
     HTTPClient http;
@@ -970,7 +974,7 @@ unsigned long checkRfidDbVersion()
 
 bool downloadRfidDb()
 {
-    if (WiFi.status() != WL_CONNECTED || !sdCardAvailable)
+    if (isSignalWeak() || !sdCardAvailable)
         return false;
 
     showOLED(F("RFID DB"), "MENGUNDUH...");
@@ -1110,7 +1114,7 @@ bool downloadRfidDb()
 
 void checkAndUpdateRfidDb()
 {
-    if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
+    if (!sdCardAvailable || isSignalWeak())
         return;
     if (millis() - timers.lastRfidDbCheck < RFID_DB_CHECK_INTERVAL)
         return;
@@ -1609,7 +1613,7 @@ bool readQueueFile(const char *filename, OfflineRecord *records, int *count, int
 
 bool syncQueueFile(const char *filename)
 {
-    if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
+    if (!sdCardAvailable || isSignalWeak())
         return false;
 
     OfflineRecord records[MAX_RECORDS_PER_FILE];
@@ -1658,10 +1662,12 @@ bool syncQueueFile(const char *filename)
 
     esp_task_wdt_reset();
     int responseCode = http.POST(payload);
+    esp_task_wdt_reset();
 
     if (responseCode == 200)
     {
         String body = http.getString();
+        esp_task_wdt_reset();
         http.end();
 
         DynamicJsonDocument res(4096);
@@ -1691,7 +1697,17 @@ bool syncQueueFile(const char *filename)
 
 void chunkedSync()
 {
-    if (!sdCardAvailable || WiFi.status() != WL_CONNECTED)
+
+    esp_task_wdt_delete(nullptr);
+    esp_task_wdt_deinit();
+    const esp_task_wdt_config_t wdtLong = {
+        .timeout_ms = 180000, // 3 menit
+        .idle_core_mask = 0,
+        .trigger_panic = true};
+    esp_task_wdt_init(&wdtLong);
+    esp_task_wdt_add(nullptr);
+
+    if (!sdCardAvailable || isSignalWeak())
     {
         syncState.inProgress = false;
         return;
@@ -1758,6 +1774,15 @@ void chunkedSync()
             }
         }
     }
+
+    esp_task_wdt_delete(nullptr);
+    esp_task_wdt_deinit();
+    const esp_task_wdt_config_t wdtNormal = {
+        .timeout_ms = WDT_TIMEOUT_SEC * 1000,
+        .idle_core_mask = 0,
+        .trigger_panic = true};
+    esp_task_wdt_init(&wdtNormal);
+    esp_task_wdt_add(nullptr);
 }
 
 // ========================================
@@ -1813,7 +1838,7 @@ bool connectToWiFi()
 
 bool pingAPI()
 {
-    if (WiFi.status() != WL_CONNECTED)
+    if (isSignalWeak())
         return false;
     HTTPClient http;
     http.setTimeout(5000);
@@ -1877,21 +1902,24 @@ void processReconnect()
 
     case RECONNECT_SUCCESS:
         isOnline = true;
-        syncTimeWithFallback();
-        if (nvsGetCount() > 0)
-            nvsSyncToServer();
-        if (sdCardAvailable)
+        if (!isSignalWeak())
         {
-            refreshPendingCache();
-            if (cachedPendingRecords > 0)
+            syncTimeWithFallback();
+            if (nvsGetCount() > 0)
+                nvsSyncToServer();
+            if (sdCardAvailable)
             {
-                char buf[20];
-                snprintf(buf, sizeof(buf), "%d RECORDS", cachedPendingRecords);
-                showOLED(F("SYNCING"), buf);
-                syncState.inProgress = false;
-                syncState.currentFile = 0;
-                timers.lastSync = millis();
-                chunkedSync();
+                refreshPendingCache();
+                if (cachedPendingRecords > 0)
+                {
+                    char buf[20];
+                    snprintf(buf, sizeof(buf), "%d RECORDS", cachedPendingRecords);
+                    showOLED(F("SYNCING"), buf);
+                    syncState.inProgress = false;
+                    syncState.currentFile = 0;
+                    timers.lastSync = millis();
+                    chunkedSync();
+                }
             }
         }
         reconnectState = RECONNECT_IDLE;
@@ -1964,6 +1992,12 @@ bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
     return false;
 }
 
+int8_t signalThreshold = -80;
+bool isSignalWeak()
+{
+    return WiFi.status() != WL_CONNECTED || WiFi.RSSI() < signalThreshold;
+}
+
 bool kirimPresensi(const char *rfidUID, char *message)
 {
     if (!isTimeValid())
@@ -2009,7 +2043,7 @@ bool kirimPresensi(const char *rfidUID, char *message)
         }
     }
 
-    if (WiFi.status() == WL_CONNECTED)
+    if (WiFi.status() == WL_CONNECTED && !isSignalWeak())
     {
         bool sent = kirimLangsung(rfidUID, timestamp, message);
         if (sent)
@@ -2426,7 +2460,7 @@ void setup()
             delay(800);
             esp_task_wdt_reset();
         }
-        if (isOnline)
+        if (isOnline && !isSignalWeak())
         {
             showOLED(F("API OK"), "SYNCING TIME");
             playToneSuccess();
@@ -2546,7 +2580,7 @@ void loop()
     if (now - timers.lastPeriodicCheck >= PERIODIC_CHECK_INTERVAL)
     {
         timers.lastPeriodicCheck = now;
-        if (WiFi.status() == WL_CONNECTED)
+        if (!isSignalWeak())
         {
             checkOtaUpdate();
             checkAndUpdateRfidDb();
