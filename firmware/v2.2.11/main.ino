@@ -1,6 +1,6 @@
 /*
  * ======================================================================================
- * SISTEM PRESENSI PINTAR (RFID) - QUEUE SYSTEM v2.2.11 (With OTA + RFID Local DB)
+ * SISTEM PRESENSI PINTAR (RFID) - QUEUE SYSTEM v2.2.11 MERGED (With OTA + RFID Local DB)
  * ======================================================================================
  * Device  : ESP32-C3 Super Mini
  * Author  : Yahya Zulfikri
@@ -24,12 +24,12 @@
 #include <esp_task_wdt.h>
 #include <Preferences.h>
 #include <Update.h>
-#include <esp_ota_ops.h> // [Fix #3] untuk OTA rollback
+#include <esp_ota_ops.h>
 
 // ========================================
 // BUILD MODE
 // ========================================
-#define DEV_MODE // Uncomment untuk development (HTTP), comment untuk production (HTTPS)
+#define DEV_MODE // Comment baris ini untuk production
 
 // ========================================
 // PIN DEFINITIONS
@@ -73,7 +73,6 @@
 #define MAX_RECORDS_PER_FILE 25
 #define MAX_QUEUE_FILES 2000
 #define MAX_SYNC_FILES_PER_CYCLE 5
-// [Fix #8] MAX_DUPLICATE_CHECK_LINES sekarang relevan: +1 untuk baris header CSV
 #define MAX_DUPLICATE_CHECK_LINES (MAX_RECORDS_PER_FILE + 1)
 #define QUEUE_WARN_THRESHOLD 1600
 #define METADATA_FILE "/queue_meta.txt"
@@ -102,10 +101,10 @@
 // ========================================
 // SCHEDULE CONFIG
 // ========================================
-#define SLEEP_START_HOUR 19
-#define SLEEP_END_HOUR 20
+#define SLEEP_START_HOUR 18
+#define SLEEP_END_HOUR 5
 #define OLED_DIM_START_HOUR 8
-#define OLED_DIM_END_HOUR 14
+#define OLED_DIM_END_HOUR 12
 #define GMT_OFFSET_SEC 25200L
 
 // ========================================
@@ -147,13 +146,12 @@ enum ReconnectState
     RECONNECT_FAILED
 };
 
-// [Fix #7] Enum hasil saveToQueue untuk membedakan jenis kegagalan
 enum SaveResult
 {
     SAVE_OK,
     SAVE_DUPLICATE,
-    SAVE_QUEUE_FULL, // semua 2000 slot terpakai, tidak bisa rotasi
-    SAVE_SD_ERROR    // error akses SD card
+    SAVE_QUEUE_FULL,
+    SAVE_SD_ERROR
 };
 
 // ========================================
@@ -296,7 +294,7 @@ bool loadRfidCacheFromFile();
 void freeRfidCache();
 bool isRfidInCache(const char *rfid);
 void checkAndUpdateRfidDb();
-SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime); // [Fix #7]
+SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime);
 
 // ========================================
 // SD MUTEX
@@ -307,7 +305,10 @@ inline void acquireSD()
         delay(5);
     sdBusy = true;
 }
-inline void releaseSD() { sdBusy = false; }
+inline void releaseSD()
+{
+    sdBusy = false;
+}
 
 // ========================================
 // SPI CS
@@ -317,10 +318,13 @@ inline void selectSD()
     digitalWrite(PIN_RFID_SS, HIGH);
     digitalWrite(PIN_SD_CS, LOW);
 }
-inline void deselectSD() { digitalWrite(PIN_SD_CS, HIGH); }
+inline void deselectSD()
+{
+    digitalWrite(PIN_SD_CS, HIGH);
+}
 
 // ========================================
-// HTTP CLIENT (Dev: plain, Prod: secure)
+// HTTP CLIENT (Dev: plain HTTP, Prod: HTTPS)
 // ========================================
 #ifdef DEV_MODE
 WiFiClient &getHttpClient()
@@ -538,9 +542,6 @@ void checkOLEDSchedule()
 // ========================================
 // TIME
 // ========================================
-
-// [Fix #5] isTimeValid() tidak lagi menduplikasi logika getTimeWithFallback().
-// Cukup delegate ke getTimeWithFallback() — satu sumber kebenaran.
 bool isTimeValid()
 {
     struct tm timeInfo;
@@ -684,8 +685,6 @@ void nvsDeleteRecord(int index)
     prefs.end();
 }
 
-// [Fix #1] Tambah guard unixTime >= rec.unixTime sebelum unsigned subtraction
-// untuk mencegah wraparound jika waktu sistem melompat mundur setelah recovery NVS.
 bool nvsIsDuplicate(const char *rfid, unsigned long unixTime)
 {
     int count = nvsGetCount();
@@ -694,9 +693,7 @@ bool nvsIsDuplicate(const char *rfid, unsigned long unixTime)
         OfflineRecord rec;
         if (!nvsLoadRecord(i, rec))
             continue;
-        if (strcmp(rec.rfid, rfid) == 0 &&
-            unixTime >= rec.unixTime &&
-            (unixTime - rec.unixTime) < MIN_REPEAT_INTERVAL)
+        if (strcmp(rec.rfid, rfid) == 0 && unixTime >= rec.unixTime && (unixTime - rec.unixTime) < MIN_REPEAT_INTERVAL)
             return true;
     }
     return false;
@@ -725,8 +722,6 @@ bool nvsSaveToBuffer(const char *rfid, const char *timestamp, unsigned long unix
     return true;
 }
 
-// [Fix #6] nvsSetCount(0) dipanggil SEBELUM loop delete.
-// Mencegah kondisi count tidak konsisten jika WDT reset terjadi di tengah iterasi delete.
 bool nvsSyncToServer()
 {
     int count = nvsGetCount();
@@ -788,8 +783,6 @@ bool nvsSyncToServer()
             }
         }
 
-        // [Fix #6] Reset count SEBELUM delete supaya jika ada tap baru masuk
-        // setelah baris ini, nvsGetCount() sudah 0 dan slot mulai dari awal.
         nvsSetCount(0);
         for (int i = 0; i < count; i++)
             nvsDeleteRecord(i);
@@ -832,8 +825,6 @@ void freeRfidCache()
     rfidCacheLoaded = false;
 }
 
-// [Fix #4] Validasi digit ditambahkan pada pass 1 dan pass 2,
-// konsisten dengan logika di downloadRfidDb().
 bool loadRfidCacheFromFile()
 {
     freeRfidCache();
@@ -859,7 +850,6 @@ bool loadRfidCacheFromFile()
         return false;
     }
 
-    // Pass 1: hitung baris valid (10 karakter digit)
     int count = 0;
     char line[12];
     while (dbFile.fgets(line, sizeof(line)) > 0)
@@ -870,7 +860,6 @@ bool loadRfidCacheFromFile()
             line[--len] = '\0';
         if (len == 10)
         {
-            // [Fix #4] Validasi semua karakter harus digit
             bool allDigit = true;
             for (int j = 0; j < 10; j++)
                 if (!isdigit((unsigned char)line[j]))
@@ -893,7 +882,6 @@ bool loadRfidCacheFromFile()
         return false;
     }
 
-    // Pass 2: isi data (validasi digit diulang untuk konsistensi)
     int idx = 0;
     while (dbFile.fgets(line, sizeof(line)) > 0 && idx < count)
     {
@@ -903,7 +891,6 @@ bool loadRfidCacheFromFile()
             line[--len] = '\0';
         if (len == 10)
         {
-            // [Fix #4] Validasi ulang digit sebelum masuk ke heap
             bool allDigit = true;
             for (int j = 0; j < 10; j++)
                 if (!isdigit((unsigned char)line[j]))
@@ -1399,7 +1386,6 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
         if (file.available())
             file.fgets(line, sizeof(line));
         int linesRead = 0;
-        // [Fix #8] MAX_DUPLICATE_CHECK_LINES kini = MAX_RECORDS_PER_FILE + 1
         while (file.fgets(line, sizeof(line)) > 0 && linesRead < MAX_DUPLICATE_CHECK_LINES)
         {
             esp_task_wdt_reset();
@@ -1430,7 +1416,6 @@ bool isDuplicateInternal(const char *rfid, unsigned long currentUnixTime)
 
 // ========================================
 // SAVE TO QUEUE
-// [Fix #7] Return type diubah dari bool ke SaveResult enum
 // ========================================
 SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long unixTime)
 {
@@ -1490,7 +1475,6 @@ SaveResult saveToQueue(const char *rfid, const char *timestamp, unsigned long un
             {
                 deselectSD();
                 releaseSD();
-                // [Fix #7] Kembalikan SAVE_QUEUE_FULL, bukan SAVE_SD_ERROR
                 return SAVE_QUEUE_FULL;
             }
             sd.remove(nextFilename);
@@ -1722,9 +1706,7 @@ void chunkedSync()
     int filesSynced = 0;
     char filename[20];
 
-    while (syncState.currentFile < MAX_QUEUE_FILES &&
-           filesSynced < MAX_SYNC_FILES_PER_CYCLE &&
-           millis() - syncState.startTime < MAX_SYNC_TIME)
+    while (syncState.currentFile < MAX_QUEUE_FILES && filesSynced < MAX_SYNC_FILES_PER_CYCLE && millis() - syncState.startTime < MAX_SYNC_TIME)
     {
         getQueueFileName(syncState.currentFile, filename, sizeof(filename));
         acquireSD();
@@ -1929,8 +1911,7 @@ void uidToString(uint8_t *uid, uint8_t length, char *output)
 {
     if (length >= 4)
     {
-        uint32_t value = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) |
-                         ((uint32_t)uid[1] << 8) | uid[0];
+        uint32_t value = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) | ((uint32_t)uid[1] << 8) | uid[0];
         sprintf(output, "%010lu", value);
     }
     else
@@ -1983,8 +1964,6 @@ bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
     return false;
 }
 
-// [Fix #7] kirimPresensi() kini membaca SaveResult enum dari saveToQueue()
-// dan menampilkan pesan yang akurat: QUEUE PENUH vs SD CARD ERROR.
 bool kirimPresensi(const char *rfidUID, char *message)
 {
     if (!isTimeValid())
@@ -2020,7 +1999,6 @@ bool kirimPresensi(const char *rfidUID, char *message)
             return false;
 
         case SAVE_QUEUE_FULL:
-            // [Fix #7] Pesan spesifik untuk queue penuh, bukan SD CARD ERROR
             strcpy(message, "QUEUE PENUH!");
             return false;
 
@@ -2175,10 +2153,7 @@ void showStartupAnimation()
 
 bool displayStateChanged()
 {
-    return currentDisplay.isOnline != previousDisplay.isOnline ||
-           currentDisplay.pendingRecords != previousDisplay.pendingRecords ||
-           currentDisplay.wifiSignal != previousDisplay.wifiSignal ||
-           strncmp(currentDisplay.time, previousDisplay.time, 6) != 0;
+    return currentDisplay.isOnline != previousDisplay.isOnline || currentDisplay.pendingRecords != previousDisplay.pendingRecords || currentDisplay.wifiSignal != previousDisplay.wifiSignal || strncmp(currentDisplay.time, previousDisplay.time, 6) != 0;
 }
 
 void updateCurrentDisplayState()
@@ -2360,49 +2335,26 @@ void setup()
         .trigger_panic = true};
     esp_task_wdt_init(&wdtConfig);
     esp_task_wdt_add(nullptr);
-
-    // [Fix #3] Tandai firmware aktif sebagai valid untuk mencegah rollback otomatis.
-    // Harus dipanggil sedini mungkin di setup() sebelum ada potensi crash.
-    // Jika firmware baru crash sebelum baris ini tercapai, bootloader akan
-    // otomatis rollback ke firmware sebelumnya.
     esp_ota_mark_app_valid_cancel_rollback();
-
     Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
     pinMode(PIN_BUZZER, OUTPUT);
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-
     showStartupAnimation();
     playStartupMelody();
     esp_task_wdt_reset();
-
     uint8_t mac[6];
     WiFi.macAddress(mac);
     snprintf(deviceId, sizeof(deviceId), "ESP32_%02X%02X", mac[4], mac[5]);
     for (int i = 0; deviceId[i]; i++)
         deviceId[i] = toupper(deviceId[i]);
-
-    // ----------------------------------------
-    // RECOVERY WAKTU — URUTAN KRITIS, JANGAN DIUBAH
-    // ----------------------------------------
-    // [Fix #9] Komentar eksplisit dependency urutan lapis 1 dan 2.
-    //
-    // LAPIS 2 HARUS DIEKSEKUSI SEBELUM LAPIS 3.
-    // Alasan: jika sleepDurationSeconds > 0 (bangun dari deep sleep),
-    // lastValidTime harus dikompensasi dulu ke nilai terbaru sebelum
-    // disimpan ke NVS. Jika lapis 3 jalan lebih dulu dan membaca NVS
-    // (yang belum dikompensasi), lastValidTime akan salah.
-    //
-    // Lapis 2: Bangun dari deep sleep — kompensasi millis() reset
     if (timeWasSynced && lastValidTime > 0 && sleepDurationSeconds > 0)
     {
         lastValidTime += (time_t)sleepDurationSeconds;
-        nvsSaveLastTime(lastValidTime); // simpan nilai terkompensasi ke NVS
+        nvsSaveLastTime(lastValidTime);
         bootTime = millis();
         bootTimeSet = true;
         sleepDurationSeconds = 0;
     }
-    // Lapis 3: Reset paksa / power putus — RTC RAM hilang, pulihkan dari NVS flash
-    // (hanya berlaku jika lapis 2 tidak aktif, yaitu bukan bangun dari deep sleep)
     if (!timeWasSynced || lastValidTime == 0)
     {
         time_t saved = nvsLoadLastTime();
@@ -2414,12 +2366,9 @@ void setup()
             bootTimeSet = true;
         }
     }
-
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
-
     showProgress(F("INIT SD CARD"), 1500);
     sdCardAvailable = initSDCard();
-
     if (sdCardAvailable)
     {
         showOLED(F("SD CARD"), "TERSEDIA");
@@ -2447,7 +2396,6 @@ void setup()
         showOLED(F("SD CARD"), "TIDAK ADA");
         playToneError();
         delay(1000);
-
         int nvsCount = nvsGetCount();
         if (nvsCount > 0)
         {
@@ -2457,11 +2405,9 @@ void setup()
             delay(1000);
         }
     }
-
     showProgress(F("CONNECTING WIFI"), 1500);
     bool wifiOk = connectToWiFi();
     esp_task_wdt_reset();
-
     if (!wifiOk)
     {
         offlineBootFallback();
@@ -2487,7 +2433,6 @@ void setup()
             delay(500);
             syncTimeWithFallback();
             esp_task_wdt_reset();
-
             int nvsCount = nvsGetCount();
             if (nvsCount > 0)
             {
@@ -2498,7 +2443,6 @@ void setup()
                 nvsSyncToServer();
                 esp_task_wdt_reset();
             }
-
             if (sdCardAvailable)
             {
                 refreshPendingCache();
@@ -2511,7 +2455,6 @@ void setup()
                     chunkedSync();
                     esp_task_wdt_reset();
                 }
-
                 showProgress(F("SYNC RFID DB"), 500);
                 unsigned long localVer = nvsGetRfidDbVer();
                 unsigned long serverVer = checkRfidDbVersion();
@@ -2530,12 +2473,10 @@ void setup()
             delay(1500);
         }
     }
-
     showProgress(F("INIT RFID"), 1000);
     rfidReader.PCD_Init();
     delay(100);
     digitalWrite(PIN_RFID_SS, HIGH);
-
     byte version = rfidReader.PCD_ReadRegister(rfidReader.VersionReg);
     if (version == 0x00 || version == 0xFF)
     {
@@ -2544,10 +2485,8 @@ void setup()
         delay(3000);
         ESP.restart();
     }
-
     showOLED(F("SISTEM SIAP"), isOnline ? "ONLINE" : "OFFLINE");
     playToneSuccess();
-
     if (!bootTimeSet)
     {
         bootTime = millis();
@@ -2611,7 +2550,6 @@ void loop()
         {
             checkOtaUpdate();
             checkAndUpdateRfidDb();
-
             if (otaState.updateAvailable && !rfidFeedback.active)
                 performOtaUpdate();
 
@@ -2620,7 +2558,6 @@ void loop()
                 timers.lastNvsSync = now;
                 nvsSyncToServer();
             }
-
             if (sdCardAvailable)
             {
                 if (syncState.inProgress)
@@ -2638,7 +2575,6 @@ void loop()
         }
         periodicTimeSync();
     }
-
     struct tm timeInfo;
     if (getTimeWithFallback(&timeInfo))
     {
@@ -2650,37 +2586,28 @@ void loop()
                 chunkedSync();
                 return;
             }
-
             showOLED(F("SLEEP MODE"), "...");
             delay(1000);
-
             int sleepSeconds;
             if (h >= SLEEP_START_HOUR)
                 sleepSeconds = ((24 - h + SLEEP_END_HOUR) * 3600) - (timeInfo.tm_min * 60 + timeInfo.tm_sec);
             else
                 sleepSeconds = ((SLEEP_END_HOUR - h) * 3600) - (timeInfo.tm_min * 60 + timeInfo.tm_sec);
-
             if (sleepSeconds < 60)
                 sleepSeconds = 60;
             if (sleepSeconds > 43200)
                 sleepSeconds = 43200;
-
             char buf[24];
             snprintf(buf, sizeof(buf), "%d Jam %d Menit", sleepSeconds / 3600, (sleepSeconds % 3600) / 60);
             showOLED(F("SLEEP FOR"), buf);
             delay(2000);
-
             display.clearDisplay();
             display.display();
             display.ssd1306_command(SSD1306_DISPLAYOFF);
-
             sleepDurationSeconds = (uint64_t)sleepSeconds;
-
             esp_task_wdt_deinit();
             esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
             esp_deep_sleep_start();
-
-            // Safety net: jika deep sleep gagal dieksekusi, WDT diaktifkan kembali
             const esp_task_wdt_config_t wdtConfig = {
                 .timeout_ms = WDT_TIMEOUT_SEC * 1000,
                 .idle_core_mask = 0,
