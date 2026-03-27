@@ -13,7 +13,7 @@ Sistem ini beroperasi dengan filosofi _Self-Healing_ dan _Store-and-Forward_, me
 | Project | Madrasah Universe |
 | Author | Yahya Zulfikri |
 | Device | ESP32-C3 Super Mini |
-| Versi | 2.2.9 |
+| Versi | **2.2.11** |
 | IDE | Arduino IDE v2.3.6 |
 | Dibuat | Juli 2025 |
 | Diperbarui | Maret 2026 |
@@ -27,14 +27,14 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 ### Mekanisme Operasional Utama
 
 1. **Identifikasi:** Pengguna memindai kartu RFID pada perangkat.
-2. **Validasi Lokal RFID:** Saat ada SD card, perangkat memvalidasi UID terhadap database RFID lokal (`rfid_db.txt`) sebelum menyimpan data. Jika RFID tidak ditemukan, tap ditolak dengan pesan `HUBUNGI ADMIN`. Jika file database belum ada, validasi dilewati (fallback izinkan semua).
-3. **Pengecekan Duplikasi:** Perangkat melakukan verifikasi _debounce_ dan pengecekan duplikasi data dalam interval waktu tertentu (default: 30 menit) langsung pada penyimpanan lokal untuk mencegah input ganda. Pengecekan mencakup 3 file antrean terakhir untuk menutup celah di boundary file.
+2. **Validasi Lokal RFID:** Saat ada SD card, perangkat memvalidasi UID terhadap database RFID lokal (`rfid_db.txt`) yang telah dimuat ke RAM. Jika RFID tidak ditemukan, tap ditolak dengan pesan `HUBUNGI ADMIN`. Jika file database belum ada, validasi dilewati (fallback izinkan semua).
+3. **Pengecekan Duplikasi:** Perangkat melakukan verifikasi _debounce_ dan pengecekan duplikasi dalam interval waktu tertentu (default: 30 menit) langsung pada penyimpanan lokal untuk mencegah input ganda. Pengecekan mencakup 3 file antrean terakhir untuk menutup celah di boundary file.
 4. **Manajemen Penyimpanan (Queue System):** Saat ada SD card dan RFID valid, data masuk ke antrean CSV (`queue_X.csv`) tanpa panggilan jaringan. Metadata antrean disimpan di `queue_meta.txt` untuk efisiensi akses.
 5. **NVS Buffer (Fallback Tanpa SD Card):** Saat SD card tidak tersedia, data disimpan sementara di flash internal ESP32 (NVS) dengan kapasitas 20 record. Data di NVS disync ke server saat koneksi tersedia dan dihapus setelah berhasil. Jika NVS penuh, tap ditolak.
 6. **Sinkronisasi Latar Belakang (_Background Sync_):** Sistem secara berkala (setiap 5 menit) mengirim data secara _batch_ ke server tanpa feedback visual. NVS buffer disync terlebih dahulu sebelum queue SD card.
 7. **Reconnect Otomatis (_Silent Auto-Reconnect_):** Jika WiFi terputus, sistem mencoba reconnect setiap 5 menit di latar belakang. Setelah kembali online, NVS buffer dan queue SD disync otomatis.
 8. **Manajemen OLED Cerdas:** Layar OLED otomatis mati pada jam tertentu untuk hemat daya, namun tetap menyala sementara saat ada tapping kartu.
-9. **OTA Update Otomatis:** Perangkat memeriksa ketersediaan firmware terbaru ke server setiap 3 jam. Jika tersedia, firmware diunduh dan di-flash secara otomatis tanpa intervensi manual.
+9. **OTA Update Otomatis:** Perangkat memeriksa ketersediaan firmware terbaru ke server setiap 6 jam. Jika tersedia, firmware diunduh dan di-flash secara otomatis tanpa intervensi manual.
 10. **Integrasi Hilir:** Server memproses data _batch_ untuk keperluan notifikasi WhatsApp, laporan digital, dan analisis kehadiran.
 
 ---
@@ -68,6 +68,12 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 
 ---
 
+## Diagram Koneksi
+
+![Diagram](./diagram.svg)
+
+---
+
 ## Fitur Perangkat Lunak (Firmware)
 
 ### Core Features
@@ -78,13 +84,13 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 - **Local RFID Database:** Database RFID valid diunduh dari server dan disimpan di SD card (`rfid_db.txt`). Saat boot, seluruh daftar RFID dimuat ke RAM (heap) sebagai array pointer. Validasi saat tap dilakukan di RAM — tanpa akses SD card, tanpa HTTP call — sehingga latency tap tetap < 50ms baik online maupun offline. Database diperbarui otomatis setiap 3 jam jika ada perubahan di server (berbasis perbandingan versi timestamp).
 - **Smart Duplicate Prevention:** Algoritma _sliding window_ yang memindai 3 indeks antrean lokal terakhir untuk menolak pemindaian kartu yang sama dalam periode waktu yang dikonfigurasi (default: 30 menit).
 - **Bulk Upload Efficiency:** Mengirimkan himpunan data dalam satu permintaan HTTP POST.
-- **Hybrid Timekeeping:** Sinkronisasi waktu menggunakan NTP saat daring, dan estimasi waktu berbasis RTC internal saat luring.
-- **Deep Sleep Scheduling:** Manajemen daya otomatis di luar jam operasional (default: 18:00–05:00). Safety net reinit WDT ditempatkan langsung setelah `esp_deep_sleep_start()` di dalam `loop()` untuk kondisi sleep gagal.
+- **Hybrid Timekeeping:** Sinkronisasi waktu menggunakan NTP saat daring, dan estimasi waktu berbasis RTC internal saat luring. Waktu terakhir valid dipersist ke NVS untuk ketahanan terhadap reset paksa atau power putus.
+- **Deep Sleep Scheduling:** Manajemen daya otomatis di luar jam operasional (default: **18:00–05:00** — lihat changelog v2.2.11). Durasi sleep disimpan ke RTC RAM (`sleepDurationSeconds`) untuk kompensasi `millis()` yang reset setelah bangun. Safety net reinit WDT ditempatkan langsung setelah `esp_deep_sleep_start()` di dalam `loop()` untuk kondisi sleep gagal.
 - **Single SSID:** Konfigurasi jaringan satu SSID dengan reconnect state machine 4 state.
 
 ### Advanced Features
 
-- **OTA Update Otomatis:** Perangkat memeriksa firmware terbaru ke server setiap 3 jam. Pemeriksaan pertama dilakukan langsung saat boot (`lastOtaCheck = 0`). Jika tersedia, firmware diunduh dan di-flash tanpa intervensi manual. WDT dinonaktifkan selama proses download untuk mencegah false timeout.
+- **OTA Update Otomatis:** Perangkat memeriksa firmware terbaru ke server setiap 6 jam. Pemeriksaan pertama dilakukan langsung saat boot (`lastOtaCheck = 0`). Jika tersedia, firmware diunduh dan di-flash tanpa intervensi manual. WDT dinonaktifkan selama proses download untuk mencegah false timeout.
 - **Silent Background Sync:** Sinkronisasi data berjalan di latar belakang tanpa feedback visual atau audio. NVS buffer disync sebelum queue SD.
 - **Non-Intrusive Reconnect:** Auto-reconnect WiFi tanpa menampilkan loading screen.
 - **Zero-Interruption UX:** Tap kartu tidak pernah terblokir oleh proses background maupun feedback OLED. OTA update hanya dieksekusi saat tidak ada tap aktif.
@@ -96,6 +102,7 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 - **Heap Fragmentation Prevention:** Seluruh operasi string menggunakan `char[]` di stack. Download RFID DB menggunakan streaming chunk tanpa buffering seluruh response ke heap.
 - **OLED Auto Dim:** Display mati otomatis pukul 08:00 dan nyala kembali pukul 14:00.
 - **Smart Wake-up on Tap:** Display menyala sementara saat ada tap kartu meski dalam periode dim, menggunakan `RfidFeedback` struct non-blocking.
+- **NVS Time Persistence:** Waktu valid terakhir disimpan ke NVS dan dipulihkan saat boot untuk menjaga estimasi waktu meski RTC RAM hilang akibat power putus atau reset paksa.
 
 ---
 
@@ -126,7 +133,7 @@ const unsigned long RECONNECT_INTERVAL  = 300000;  // 5 menit
 const unsigned long TIME_SYNC_INTERVAL  = 3600000; // 1 jam
 
 // Konfigurasi OTA
-const char FIRMWARE_VERSION[]           = "2.2.9";
+const char FIRMWARE_VERSION[]           = "2.2.11";
 const unsigned long OTA_CHECK_INTERVAL  = 10800000; // 3 jam
 
 // Konfigurasi RFID Local DB
@@ -135,7 +142,7 @@ const char NVS_KEY_RFID_VER[]           = "rfid_db_ver";
 const unsigned long RFID_DB_CHECK_INTERVAL = 10800000; // 3 jam
 
 // Konfigurasi Sleep Mode
-const int SLEEP_START_HOUR = 18;
+const int SLEEP_START_HOUR = 18;  // ← diperbarui di v2.2.11
 const int SLEEP_END_HOUR   = 5;
 
 // Konfigurasi OLED Auto Dim
@@ -172,16 +179,22 @@ const int WDT_TIMEOUT_SEC = 60;
 4. **Validasi saat Tap:** Lookup dilakukan di RAM via `isRfidInCache()` — tanpa akses SD card dan tanpa HTTP call. Jika RFID tidak ditemukan di cache RAM, tap langsung ditolak dengan pesan `HUBUNGI ADMIN`.
 5. **Fallback DB tidak ada:** Jika `rfid_db.txt` belum ada atau gagal dimuat ke RAM, `isRfidInCache()` mengembalikan `true` — semua tap diizinkan masuk ke queue, validasi diserahkan ke server saat sync.
 6. **Siklus hidup cache RAM:** Cache dimuat saat boot setelah SD init, di-reload setelah download DB baru, di-reload setelah SD card kembali terbaca, dan di-free saat SD card terlepas.
-6. **Pembaruan Berkala:** Setiap 3 jam, `checkAndUpdateRfidDb()` dipanggil dari loop. Cek versi dilakukan terlebih dahulu; download hanya dilakukan jika versi server lebih baru dari versi lokal.
+7. **Pembaruan Berkala:** Setiap 3 jam, `checkAndUpdateRfidDb()` dipanggil dari loop. Cek versi dilakukan terlebih dahulu; download hanya dilakukan jika versi server lebih baru dari versi lokal.
 
 ## Mekanisme OTA Update
 
 1. **Pemeriksaan:** Setiap 3 jam (dan langsung saat boot pertama), perangkat POST ke `/api/presensi/firmware/check` dengan versi firmware saat ini dan device ID.
-2. **Perbandingan Versi:** Server membandingkan versi menggunakan `version_compare`. Jika versi server lebih baru, response menyertakan URL download.
+2. **Perbandingan Versi:** Server membandingkan versi. Jika versi server lebih baru, response menyertakan URL download.
 3. **Notifikasi:** OLED menampilkan versi terbaru yang tersedia disertai bunyi notifikasi.
 4. **Eksekusi:** Update dieksekusi di iterasi loop berikutnya, hanya jika tidak ada tap RFID aktif (`!rfidFeedback.active`).
 5. **Download & Flash:** WDT dinonaktifkan, firmware diunduh via HTTPS, dan di-flash ke partisi OTA.
 6. **Hasil:** Sukses → restart otomatis dengan firmware baru. Gagal → `otaState.updateAvailable` di-reset, perangkat lanjut beroperasi normal.
+
+## Mekanisme Timekeeping & Kompensasi Deep Sleep
+
+- Waktu valid terakhir disimpan ke NVS (`nvsSaveLastTime`) setiap kali berhasil sync NTP.
+- Saat boot, jika RTC RAM hilang (power putus / reset paksa), waktu dipulihkan dari NVS.
+- Saat bangun dari deep sleep, `sleepDurationSeconds` (disimpan di RTC RAM sebelum tidur) digunakan untuk mengkompensasi `lastValidTime`, karena `millis()` reset ke 0 setelah deep sleep.
 
 ---
 
@@ -192,7 +205,7 @@ const int WDT_TIMEOUT_SEC = 60;
 ```
 Startup Animation
     └─ Init SD Card
-        ├─ Ada SD  → Load metadata → tampil pending records
+        ├─ Ada SD  → Load metadata → tampil pending records → Load RFID cache ke RAM
         └─ Tidak ada SD → cek NVS buffer → tampil jika ada
     └─ Connect WiFi
         ├─ Berhasil → Ping API
@@ -328,7 +341,7 @@ RECONNECT_TRYING
 - **Payload:**
   ```json
   {
-    "version": "2.2.9",
+    "version": "2.2.11",
     "device_id": "ESP32_A1B2"
   }
   ```
@@ -464,7 +477,7 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 
 | Parameter            | Nilai                          |
 | :------------------- | :----------------------------- |
-| Check Interval       | 10.800 detik (3 jam)           |
+| Check Interval       | **10.800 detik (3 jam)**       |
 | Check saat boot      | Ya (langsung, `lastOtaCheck=0`) |
 | Transport            | HTTPS                          |
 | WDT saat download    | Dinonaktifkan sementara        |
@@ -504,6 +517,7 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 | Tap Latency (Tanpa SD, offline) | < 50ms (NVS)                 |
 | Background Sync         | Setiap 5 menit                     |
 | RFID DB Update Check    | Setiap 3 jam                       |
+| OTA Check Interval      | Setiap 3 jam                       |
 | Queue Capacity          | 50.000 records (SD) + 20 (NVS)     |
 | Power (Active)          | ~150mA                             |
 | Power (Deep Sleep)      | < 5mA                              |
@@ -513,7 +527,7 @@ Library bawaan ESP32 core (tidak perlu install terpisah): `WiFi`, `WiFiClientSec
 ## Troubleshooting
 
 **Masalah: Device restart saat boot setelah SD card terdeteksi**
-Kemungkinan WDT trigger selama scan file. Pastikan menggunakan firmware v2.2.9 yang sudah menyertakan `esp_task_wdt_reset()` di setiap iterasi loop operasi panjang. Jika masih terjadi, naikkan `WDT_TIMEOUT_SEC` sementara ke 120 untuk diagnosis.
+Kemungkinan WDT trigger selama scan file. Pastikan menggunakan firmware v2.2.11 yang sudah menyertakan `esp_task_wdt_reset()` di setiap iterasi loop operasi panjang. Jika masih terjadi, naikkan `WDT_TIMEOUT_SEC` sementara ke 120 untuk diagnosis.
 
 **Masalah: `esp_task_wdt_init` compilation error**
 Pastikan menggunakan ESP32 Arduino core v3.x.
@@ -537,28 +551,41 @@ Cek endpoint `/api/presensi/rfid-list/version` dan `/api/presensi/rfid-list` dap
 Cek `failed_log.csv` di SD card untuk melihat alasan penolakan dari server.
 
 **Masalah: OTA update tidak berjalan meski ada versi baru**
-Pastikan firmware aktif di panel Filament sudah di-toggle `is_active`. Cek juga koneksi WiFi dan header `X-API-KEY`. OTA hanya berjalan saat WiFi terhubung.
+Pastikan firmware aktif di panel sudah di-toggle `is_active`. Cek juga koneksi WiFi dan header `X-API-KEY`. OTA hanya berjalan saat WiFi terhubung.
 
 **Masalah: OTA update gagal dengan error code**
 Error code ditampilkan di OLED (`ERR -xxx`). Pastikan URL download dapat diakses dan file `.bin` tidak korup. Perangkat akan lanjut beroperasi normal setelah gagal.
 
 **Masalah: Device restart loop setelah OTA**
-Kemungkinan file `.bin` korup atau tidak kompatibel dengan ESP32-C3. Upload ulang firmware yang benar melalui panel Filament dan aktifkan kembali.
+Kemungkinan file `.bin` korup atau tidak kompatibel dengan ESP32-C3. Upload ulang firmware yang benar dan aktifkan kembali.
+
+**Masalah: Waktu tidak akurat setelah power putus**
+Firmware v2.2.11 menyimpan waktu terakhir valid ke NVS. Waktu akan dipulihkan dari NVS saat boot meski RTC RAM hilang. Pastikan NVS namespace `presensi` tidak penuh.
 
 ---
 
 ## Changelog
 
+### v2.2.11 (Maret 2026)
+- Kembalikan jadwal sleep mode ke `SLEEP_START_HOUR 18` (sleep mulai pukul 18:00), menggantikan nilai 23:00 yang ditetapkan di v2.2.10
+- Kembalikan `OTA_CHECK_INTERVAL` ke 3 jam (`10800000`), menggantikan nilai 6 jam yang ditetapkan di v2.2.10
+- Update versi string ke `2.2.11`
+
+### v2.2.10 (Maret 2026)
+- Tambah persistensi waktu ke NVS (`nvsSaveLastTime` / `nvsLoadLastTime`) untuk ketahanan terhadap reset paksa dan power putus
+- Tambah kompensasi `lastValidTime` saat bangun dari deep sleep menggunakan `sleepDurationSeconds` di RTC RAM, mengatasi `millis()` yang reset ke 0 setelah deep sleep
+- Ubah interval OTA check dari 3 jam menjadi 6 jam (`OTA_CHECK_INTERVAL = 21600000`)
+- Ubah jadwal sleep mode dari `SLEEP_START_HOUR 18` menjadi `SLEEP_START_HOUR 23` (sleep mulai pukul 23:00)
+- Update versi string ke `2.2.10`
+
 ### v2.2.9 (Maret 2026)
 - Tambah fitur RFID Local Database untuk validasi offline tanpa panggilan jaringan saat tap
 - Tambah endpoint `/api/presensi/rfid-list` (plain text streaming) dan `/api/presensi/rfid-list/version` (JSON versi)
 - Tambah fungsi `downloadRfidDb()` dengan streaming write ke SD untuk efisiensi heap
-- Tambah fungsi `isRfidInDb()` untuk lookup lokal saat tap kartu
+- Tambah fungsi `loadRfidCacheFromFile()` dan `isRfidInCache()` untuk manajemen cache RAM
 - Tambah fungsi `checkAndUpdateRfidDb()` dipanggil setiap 3 jam dan saat boot
 - Versi database disimpan di NVS key `rfid_db_ver`; download hanya dilakukan jika versi server lebih baru
 - Download menggunakan file sementara `/rfid_db.tmp` lalu di-rename untuk menjaga atomicity
-- Jika RFID tidak ditemukan di DB lokal dan online, sistem fallback ke `validateRfidOnline()` — tap tetap diproses jika server mengonfirmasi valid
-- Jika RFID tidak ditemukan di DB lokal dan offline, tap langsung ditolak dengan pesan `HUBUNGI ADMIN`
 - Tambah `lastRfidDbCheck` ke struct `Timers`
 - Update versi string ke `2.2.9`
 
@@ -568,8 +595,7 @@ Kemungkinan file `.bin` korup atau tidak kompatibel dengan ESP32-C3. Upload ulan
 - Pemeriksaan OTA langsung saat boot (`lastOtaCheck = 0`) dan setiap 3 jam
 - WDT dinonaktifkan selama proses OTA download untuk mencegah false timeout
 - Eksekusi OTA hanya saat tidak ada tap aktif (`!rfidFeedback.active`)
-- Perbaikan WDT: tambah `esp_task_wdt_reset()` di setiap iterasi loop pada `countAllOfflineRecords`, `isDuplicateInternal`, `initSDCard`, `saveToQueue`, dan `readQueueFile`
-- Perbaikan alur `kirimPresensi`: hapus pemanggilan `validateRfidOnline()` saat tanpa SD, langsung ke `kirimLangsung()`
+- Perbaikan WDT: tambah `esp_task_wdt_reset()` di setiap iterasi loop pada operasi panjang
 - Perbaikan urutan sync di `RECONNECT_SUCCESS`: NVS buffer disync sebelum SD queue
 
 ### v2.2.7 (Maret 2026)
