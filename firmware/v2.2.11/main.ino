@@ -1,6 +1,6 @@
 /*
  * ======================================================================================
- * SISTEM PRESENSI PINTAR (RFID) - QUEUE SYSTEM v2.2.11 MERGED (With OTA + RFID Local DB)
+ * SISTEM PRESENSI PINTAR (RFID) - QUEUE SYSTEM v2.2.11 (With OTA + RFID Local DB)
  * ======================================================================================
  * Device  : ESP32-C3 Super Mini
  * Author  : Yahya Zulfikri
