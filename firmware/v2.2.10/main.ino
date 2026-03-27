@@ -100,7 +100,7 @@
 // ========================================
 // SCHEDULE CONFIG
 // ========================================
-#define SLEEP_START_HOUR 23
+#define SLEEP_START_HOUR 18
 #define SLEEP_END_HOUR 5
 #define OLED_DIM_START_HOUR 8
 #define OLED_DIM_END_HOUR 14
