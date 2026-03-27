@@ -70,7 +70,7 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 
 ## Diagram Koneksi
 
-![Diagram](./diagram.svg)
+![Diagram](./firmware/v2.2.11/diagram.svg)
 
 ---
 
