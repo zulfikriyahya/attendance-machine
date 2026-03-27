@@ -40,6 +40,10 @@ Sistem menggunakan bus SPI bersama (_shared SPI bus_) untuk modul RFID dan SD Ca
 |                | SCL       | GPIO 9       | I2C Clock                    |
 | **Buzzer**     | VCC       | GPIO 10      | Output Audio                 |
 
+## Diagram Koneksi
+
+![Diagram](./diagram.svg)
+
 ## Prasyarat Perangkat Lunak
 
 Pastikan pustaka berikut terinstal pada lingkungan pengembangan:
