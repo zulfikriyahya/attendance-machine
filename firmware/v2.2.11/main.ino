@@ -29,7 +29,7 @@
 // ========================================
 // BUILD MODE
 // ========================================
-#define DEV_MODE
+// #define DEV_MODE
 
 // ========================================
 // PIN DEFINITIONS
@@ -1983,16 +1983,18 @@ bool kirimLangsung(const char *rfidUID, const char *timestamp, char *message)
         strcpy(message, "CUKUP SEKALI!");
         return false;
     }
+
     if (code == 404)
     {
         strcpy(message, "RFID UNKNOWN");
         return false;
     }
+
     snprintf(message, 32, "SERVER ERR %d", code);
     return false;
 }
 
-int8_t signalThreshold = -80;
+int8_t signalThreshold = -80; // Power Optimal!
 bool isSignalWeak()
 {
     return WiFi.status() != WL_CONNECTED || WiFi.RSSI() < signalThreshold;
