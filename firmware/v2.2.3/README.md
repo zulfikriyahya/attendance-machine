@@ -56,6 +56,10 @@ Sistem menggunakan bus SPI bersama untuk komunikasi dengan modul RFID dan SD Car
 |                | SCL       | GPIO 9       | I2C      | Clock Display                  |
 | **Buzzer**     | (+)       | GPIO 10      | PWM      | Indikator Audio                |
 
+## Diagram Koneksi
+
+![Diagram](./diagram.svg)
+
 ## Prasyarat Instalasi Perangkat Lunak
 
 Versi ini memiliki dependensi pustaka yang berbeda dari versi sebelumnya. Pastikan pustaka berikut terinstal:

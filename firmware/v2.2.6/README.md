@@ -70,6 +70,12 @@ Sistem ini menggunakan arsitektur bus SPI bersama (_Shared SPI Bus_) untuk efisi
 
 ---
 
+## Diagram Koneksi
+
+![Diagram](./diagram.svg)
+
+---
+
 ## Fitur Perangkat Lunak (Firmware)
 
 ### Core Features

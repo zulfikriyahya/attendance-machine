@@ -50,6 +50,10 @@ Sistem menggunakan bus SPI bersama (_Shared SPI Bus_) untuk komunikasi dengan mo
 
 > **Penting:** Pastikan implementasi perangkat keras mendukung penggunaan GPIO 4, 5, dan 6 secara paralel untuk dua perangkat SPI berbeda.
 
+## Diagram Koneksi
+
+![Diagram](./diagram.svg)
+
 ## Prasyarat Instalasi Perangkat Lunak
 
 Versi ini memiliki dependensi pustaka yang berbeda dari versi sebelumnya. Pastikan pustaka berikut terinstal:

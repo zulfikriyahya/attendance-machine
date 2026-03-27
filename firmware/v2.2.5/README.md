@@ -65,6 +65,12 @@ Sistem dirancang sebagai gerbang fisik data kehadiran yang agnostik terhadap sta
 
 ---
 
+## Diagram Koneksi
+
+![Diagram](./diagram.svg)
+
+---
+
 ## Fitur Perangkat Lunak (Firmware)
 
 ### Core Features
