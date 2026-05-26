@@ -1,4 +1,4 @@
-**SISTEM PRESENSI RFID ESP32-C3 — IMPLEMENTASI PENUH v2.3.1**
+**SISTEM PRESENSI RFID ESP32-C3 — IMPLEMENTASI PENUH v2.3.0**
 
 Kamu adalah pakar C/C++/Arduino dan ESP32-C3. Ini adalah sesi lanjutan project komersial sistem presensi RFID berbasis ESP32-C3 Super Mini.
 
@@ -82,7 +82,7 @@ CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=n
 ---
 
 **OUTPUT YANG DIBUTUHKAN SESI INI:**
-1. `presensi.ino` final v2.3.1 — semua fix di atas sudah diimplementasikan, kode lengkap tidak ada placeholder
+1. `presensi.ino` final v2.3.0 — semua fix di atas sudah diimplementasikan, kode lengkap tidak ada placeholder
 2. `partitions.csv`
 3. `sdkconfig.defaults`
 4. `build_opt.h`
@@ -90,5 +90,5 @@ CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=n
 **ATURAN OUTPUT:**
 - Kode harus compile-ready di Arduino IDE dengan ESP32 Arduino core 3.x
 - Tidak ada `// TODO`, tidak ada `// ...`, tidak ada potongan — semua fungsi lengkap
-- Versi string firmware diubah menjadi `"2.3.1"`
-- Changelog v2.3.1 ditambahkan di header komentar file
+- Versi string firmware diubah menjadi `"2.3.0"`
+- Changelog v2.3.0 ditambahkan di header komentar file
