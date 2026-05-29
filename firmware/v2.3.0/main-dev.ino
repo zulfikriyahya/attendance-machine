@@ -447,7 +447,7 @@ static bool checkProvisioned()
 static WiFiClientSecure _httpClient;
 static WiFiClientSecure &getHttpClient()
 {
-  _httpClient.setCACertBundle(nullptr);
+  _httpClient.setCACertBundle(nullptr, 0);
   _httpClient.setHandshakeTimeout(10);
   return _httpClient;
 }
@@ -1557,7 +1557,7 @@ void performOtaUpdate()
   showOLED(F("MENGUNDUH"), "MOHON TUNGGU...");
   extendWdtForSync();
   WiFiClientSecure otaClient;
-  otaClient.setCACertBundle(nullptr);
+  otaClient.setCACertBundle(nullptr, 0);
   HTTPClient http;
   http.begin(otaClient, otaState.url);
   http.addHeader(F("X-API-KEY"), apiKey);
