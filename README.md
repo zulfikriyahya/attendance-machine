@@ -4,7 +4,7 @@
 **Attendance Machine** adalah solusi presensi cerdas berbasis _Internet of Things_ (IoT) yang dirancang untuk mengatasi tantangan infrastruktur jaringan yang tidak stabil. Dibangun di atas mikrokontroler ESP32-C3, sistem ini menerapkan arsitektur _Hybrid_ yang menggabungkan kemampuan pemrosesan daring (_online_) dan luring (_offline_) secara mulus.
 
 ---
-![provisioning](v2.3.0/provisioning.png)
+![provisioning](firmware/v2.3.0/provisioning.png)
 ---
 
 ## Spesifikasi Proyek
