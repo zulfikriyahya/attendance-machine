@@ -6,10 +6,9 @@
  * Schema Partition : Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)
  * Author           : Yahya Zulfikri
  * Created          : Juli 2025
- * Updated          : Mei 2026
+ * Updated          : Juli 2026
  * Version          : 2.3.1
  */
-
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -34,7 +33,6 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <freertos/queue.h>
-
 #define PIN_SPI_SCK 4
 #define PIN_SPI_MOSI 6
 #define PIN_SPI_MISO 5
@@ -44,10 +42,7 @@
 #define PIN_OLED_SDA 8
 #define PIN_OLED_SCL 9
 #define PIN_BUZZER 10
-// #define PIN_BOOT 9
-#define PIN_BOOT 0 // GAP-01: dipindah dari GPIO9 (bentrok dengan PIN_OLED_SCL). \
-                   // WAJIB: pasang tombol tekan eksternal GPIO0 <-> GND. \
-                   // Tombol silkscreen "BOOT" bawaan board TIDAK lagi berfungsi untuk factory reset.
+#define PIN_BOOT 9
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define DEBOUNCE_TIME 150UL
@@ -64,8 +59,8 @@
 #define SD_REDETECT_INTERVAL 30000UL
 #define MAX_TIME_ESTIMATE_AGE 43200UL
 #define OTA_CHECK_INTERVAL 30000UL
-#define RFID_DB_CHECK_INTERVAL 30000UL
-#define TELEMETRY_INTERVAL 300000UL
+#define RFID_DB_CHECK_INTERVAL 60000UL
+#define TELEMETRY_INTERVAL 60000UL
 #define REMOTE_CONFIG_INTERVAL 600000UL
 #define FACTORY_RESET_HOLD_MS 5000UL
 #define PROVISIONING_TIMEOUT_MS 300000UL
@@ -82,9 +77,6 @@
 #define MAX_SYNC_FILES_PER_CYCLE 5
 #define MAX_SYNC_RETRIES 2
 #define QUEUE_SLOT_SEARCH_LIMIT 50
-// TODO: GAP-09 ASUMSI - jumlah slot yang dicoba sebelum menyatakan queue penuh.
-// SRS/spesifikasi asli tidak menentukan angka pasti; 50 dipilih sebagai batas wajar
-// agar tidak memindai keseluruhan MAX_QUEUE_FILES (60000) setiap kali penuh.
 #define SYNC_RETRY_DELAY_MS 2000UL
 #define FAILED_LOG_MAX_LINES 500
 #define NVS_MAX_RECORDS 40
@@ -126,9 +118,6 @@
 #define SIGNAL_THRESHOLD_CRITICAL -90
 #define FIRMWARE_VERSION "2.3.1"
 #define PROV_AP_SSID "ATTENDANCE MACHINE"
-// #define PROV_AP_PASS "P@ssw0rd"
-// GAP-02: PROV_AP_PASS statis dihapus, digantikan deriveProvisioningPassword()
-// yang menghasilkan password unik per device dari MAC address.
 #define PROV_DNS_PORT 53
 #define CRC8_POLY 0x07
 #define TASK_RFID_STACK 8192
@@ -140,11 +129,9 @@
 #define RFID_QUEUE_LEN 8
 #define DEEP_SLEEP_TASK_WAIT_MS 5000UL
 #define DEVICE_NAME_MAX_LEN 31
-
 static const char NTP_SERVER_1[] PROGMEM = "pool.ntp.org";
 static const char NTP_SERVER_2[] PROGMEM = "time.google.com";
 static const char NTP_SERVER_3[] PROGMEM = "id.pool.ntp.org";
-
 RTC_DATA_ATTR time_t lastValidTime = 0;
 RTC_DATA_ATTR bool timeWasSynced = false;
 RTC_DATA_ATTR unsigned long bootTime = 0;
@@ -152,7 +139,6 @@ RTC_DATA_ATTR bool bootTimeSet = false;
 RTC_DATA_ATTR int currentQueueFile = 0;
 RTC_DATA_ATTR bool rtcQueueFileValid = false;
 RTC_DATA_ATTR uint64_t sleepDurationSeconds = 0;
-
 enum ReconnectState
 {
   RECONNECT_IDLE,
@@ -175,14 +161,12 @@ enum SyncFileResult
   SYNC_FILE_HTTP_FAIL,
   SYNC_FILE_NO_WIFI
 };
-
 struct Timers
 {
   unsigned long lastScan, lastSync, lastTimeSync, lastReconnect;
   unsigned long lastDisplayUpdate, lastPeriodicCheck, lastOLEDScheduleCheck;
   unsigned long lastSDRedetect, lastNvsSync, lastOtaCheck, lastRfidDbCheck;
   unsigned long lastTelemetry, lastRemoteConfig;
-  // GAP-13: field lastFactoryCheck dihapus karena tidak pernah dibaca di manapun.
 };
 struct DisplayState
 {
@@ -239,7 +223,6 @@ struct EncryptedCredential
   uint8_t data[48];
   uint8_t len;
 };
-
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 MFRC522 rfidReader(PIN_RFID_SS, PIN_RFID_RST);
 SdFat sd;
@@ -247,7 +230,6 @@ FsFile file;
 Preferences prefs;
 WebServer provServer(80);
 DNSServer dnsServer;
-
 Timers timers = {};
 DisplayState currentDisplay = {false, "00:00", 0, 0};
 DisplayState previousDisplay = {false, "--:--", -1, -1};
@@ -258,11 +240,10 @@ RuntimeConfig rtCfg = {
     SLEEP_START_HOUR_DEFAULT, SLEEP_END_HOUR_DEFAULT,
     OLED_DIM_START_HOUR_DEFAULT, OLED_DIM_END_HOUR_DEFAULT,
     SYNC_INTERVAL, OTA_CHECK_INTERVAL};
-
 char lastUID[11] = "";
 char deviceId[20] = "";
 char deviceName[DEVICE_NAME_MAX_LEN + 1] = "";
-char provApPassword[16] = ""; // GAP-02
+char provApPassword[16] = "";
 bool isOnline = false;
 bool sdCardAvailable = false;
 bool oledIsOn = true;
@@ -289,7 +270,7 @@ TaskHandle_t hTaskSync = nullptr;
 TaskHandle_t hTaskDisplay = nullptr;
 TaskHandle_t hTaskLoop = nullptr;
 SemaphoreHandle_t xSdMutex = nullptr;
-SemaphoreHandle_t xConfigMutex = nullptr; // GAP-12: melindungi rtCfg
+SemaphoreHandle_t xConfigMutex = nullptr;
 SemaphoreHandle_t xDisplayMutex = nullptr;
 QueueHandle_t xRfidQueue = nullptr;
 volatile bool sleepRequested = false;
@@ -319,12 +300,6 @@ static uint8_t recordCrc8(const char *rfid, unsigned long t)
 
 static void deriveAesKey(uint8_t key[16])
 {
-  Serial.println("[AES] Deriving AES key from eFuse MAC...");
-  // GAP-04/GAP-05: keputusan sadar - skema penurunan kunci dari MAC+salt tetap dan
-  // AES-CBC tanpa HMAC/integritas TIDAK diubah pada iterasi ini, karena sudah ada
-  // device terpasang di lapangan yang kredensial NVS-nya akan tidak terbaca (corrupt)
-  // jika skema kunci berubah. Perubahan skema memerlukan mekanisme migrasi terpisah
-  // dan re-provisioning massal - di luar cakupan iterasi ini.
   uint8_t mac[6];
   esp_efuse_mac_get_default(mac);
   uint8_t seed[22];
@@ -340,18 +315,15 @@ static void deriveAesKey(uint8_t key[16])
   mbedtls_md_finish(&ctx, hash);
   mbedtls_md_free(&ctx);
   memcpy(key, hash, 16);
-  Serial.println("[AES] Key derivation done.");
 }
 
 static bool encryptString(const char *plain, EncryptedCredential &out)
 {
-  Serial.printf("[ENC] Encrypting string (len=%d)...\n", strlen(plain));
   uint8_t key[16];
   deriveAesKey(key);
   size_t plen = strlen(plain);
   if (plen > 47)
   {
-    Serial.println("[ENC] ERROR: string too long (>47)");
     return false;
   }
   uint8_t buf[48] = {};
@@ -365,13 +337,11 @@ static bool encryptString(const char *plain, EncryptedCredential &out)
   memcpy(iv, out.iv, 16);
   mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, 48, iv, buf, out.data);
   mbedtls_aes_free(&aes);
-  Serial.println("[ENC] Encrypt OK.");
   return true;
 }
 
 static bool decryptString(const EncryptedCredential &in, char *plain, size_t maxLen)
 {
-  Serial.println("[DEC] Decrypting credential...");
   uint8_t key[16];
   deriveAesKey(key);
   uint8_t buf[48];
@@ -385,41 +355,34 @@ static bool decryptString(const EncryptedCredential &in, char *plain, size_t max
   size_t copyLen = (in.len < maxLen - 1) ? in.len : maxLen - 1;
   memcpy(plain, buf, copyLen);
   plain[copyLen] = '\0';
-  Serial.println("[DEC] Decrypt OK.");
   return true;
 }
 
 static void saveEncryptedNvs(const char *ns, const char *key, const char *plain)
 {
-  Serial.printf("[NVS] saveEncrypted ns=%s key=%s\n", ns, key);
   EncryptedCredential ec;
   if (!encryptString(plain, ec))
   {
-    Serial.println("[NVS] saveEncrypted FAILED (encrypt error)");
     return;
   }
   prefs.begin(ns, false);
   prefs.putBytes(key, &ec, sizeof(EncryptedCredential));
   prefs.end();
-  Serial.println("[NVS] saveEncrypted done.");
 }
 
 static bool loadEncryptedNvs(const char *ns, const char *key, char *plain, size_t maxLen)
 {
-  Serial.printf("[NVS] loadEncrypted ns=%s key=%s\n", ns, key);
   prefs.begin(ns, true);
   size_t len = prefs.getBytesLength(key);
   if (len != sizeof(EncryptedCredential))
   {
     prefs.end();
-    Serial.printf("[NVS] loadEncrypted FAILED: len mismatch (%d vs %d)\n", len, sizeof(EncryptedCredential));
     return false;
   }
   EncryptedCredential ec;
   prefs.getBytes(key, &ec, sizeof(EncryptedCredential));
   prefs.end();
   bool ok = decryptString(ec, plain, maxLen);
-  Serial.printf("[NVS] loadEncrypted result=%d\n", ok);
   return ok;
 }
 
@@ -430,15 +393,12 @@ struct WifiCredential
 };
 
 static WifiCredential wifiCreds[3];
-// GAP-16: keputusan sadar - satu API key statis dipertahankan untuk seluruh device,
-// sesuai kontrak backend saat ini yang belum mendukung validasi API key per-device.
 static char apiKey[48] = "";
 
 static char apiBaseUrl[80] = "https://presensi.zedlabs.id";
 
 static void loadCredentials()
 {
-  Serial.println("[CFG] Loading credentials from NVS...");
   loadEncryptedNvs(NVS_NS_CONFIG, NVS_KEY_SSID1, wifiCreds[0].ssid, sizeof(wifiCreds[0].ssid));
   loadEncryptedNvs(NVS_NS_CONFIG, NVS_KEY_PASS1, wifiCreds[0].pass, sizeof(wifiCreds[0].pass));
   loadEncryptedNvs(NVS_NS_CONFIG, NVS_KEY_SSID2, wifiCreds[1].ssid, sizeof(wifiCreds[1].ssid));
@@ -466,7 +426,6 @@ static void loadCredentials()
   int slpE = prefs.getInt(NVS_KEY_CFG_SLP_E, SLEEP_END_HOUR_DEFAULT);
   int dimS = prefs.getInt(NVS_KEY_CFG_DIM_S, OLED_DIM_START_HOUR_DEFAULT);
   int dimE = prefs.getInt(NVS_KEY_CFG_DIM_E, OLED_DIM_END_HOUR_DEFAULT);
-  // GAP-18: baca sync_iv/ota_iv yang sebelumnya sudah punya key NVS tapi tidak pernah dibaca.
   unsigned long syncIv = prefs.getULong(NVS_KEY_CFG_SYNCIV, SYNC_INTERVAL);
   unsigned long otaIv = prefs.getULong(NVS_KEY_CFG_OTAIV, OTA_CHECK_INTERVAL);
   prefs.end();
@@ -475,8 +434,6 @@ static void loadCredentials()
   {
     return (h >= 0 && h <= 23) ? h : def;
   };
-  // GAP-18 ASUMSI: interval minimum 5000ms untuk mencegah nilai 0/absurd dari NVS
-  // yang berpotensi menyebabkan polling terlalu agresif.
   auto clampInterval = [](unsigned long v, unsigned long def)
   {
     return (v >= 5000UL) ? v : def;
@@ -487,17 +444,8 @@ static void loadCredentials()
   rtCfg.dimEndHour = clampHour(dimE, OLED_DIM_END_HOUR_DEFAULT);
   rtCfg.syncIntervalMs = clampInterval(syncIv, SYNC_INTERVAL);
   rtCfg.otaCheckIntervalMs = clampInterval(otaIv, OTA_CHECK_INTERVAL);
-
-  Serial.printf("[CFG] apiBaseUrl: %s\n", apiBaseUrl);
-  Serial.printf("[CFG] sleep: %d-%d, dim: %d-%d\n",
-                rtCfg.sleepStartHour, rtCfg.sleepEndHour,
-                rtCfg.dimStartHour, rtCfg.dimEndHour);
-  Serial.printf("[CFG] sync_iv=%lu ota_iv=%lu\n", rtCfg.syncIntervalMs, rtCfg.otaCheckIntervalMs); // GAP-18
-  Serial.println("[CFG] Credentials loaded.");
 }
 
-// GAP-12: snapshot rtCfg dengan proteksi mutex, mencegah race condition antara
-// fetchRemoteConfig() (penulis) dengan taskSync/taskDisplay/loop() (pembaca).
 RuntimeConfig getRuntimeConfigSnapshot()
 {
   RuntimeConfig snap;
@@ -508,15 +456,11 @@ RuntimeConfig getRuntimeConfigSnapshot()
   }
   else
   {
-    Serial.println("[CFG] PERINGATAN: gagal ambil xConfigMutex, snapshot rtCfg mungkin tidak konsisten.");
     snap = rtCfg;
   }
   return snap;
 }
 
-// GAP-18: persist rtCfg ke NVS agar bertahan melewati restart/deep sleep,
-// memakai key NVS_KEY_CFG_SYNCIV/NVS_KEY_CFG_OTAIV yang sudah ada di #define
-// namun sebelumnya tidak pernah dipakai untuk menulis.
 static void persistRuntimeConfigToNvs(const RuntimeConfig &cfg)
 {
   prefs.begin(NVS_NS_CONFIG, false);
@@ -527,7 +471,6 @@ static void persistRuntimeConfigToNvs(const RuntimeConfig &cfg)
   prefs.putULong(NVS_KEY_CFG_SYNCIV, cfg.syncIntervalMs);
   prefs.putULong(NVS_KEY_CFG_OTAIV, cfg.otaCheckIntervalMs);
   prefs.end();
-  Serial.println("[CFG] rtCfg dipersist ke NVS.");
 }
 
 static void saveCredential(const char *key, const char *val)
@@ -537,12 +480,10 @@ static void saveCredential(const char *key, const char *val)
 
 static void markProvisioned()
 {
-  Serial.println("[PROV] Marking device as provisioned...");
   prefs.begin(NVS_NS_CONFIG, false);
   prefs.putBool(NVS_KEY_PROVISIONED, true);
   prefs.end();
   isProvisioned = true;
-  Serial.println("[PROV] Device marked provisioned.");
 }
 
 static bool checkProvisioned()
@@ -550,7 +491,6 @@ static bool checkProvisioned()
   prefs.begin(NVS_NS_CONFIG, true);
   bool v = prefs.getBool(NVS_KEY_PROVISIONED, false);
   prefs.end();
-  Serial.printf("[PROV] checkProvisioned=%d\n", v);
   return v;
 }
 
@@ -558,8 +498,6 @@ static WiFiClientSecure _httpClient;
 
 static WiFiClientSecure &getHttpClient()
 {
-  // GAP-03: keputusan sadar - verifikasi sertifikat TLS tetap dinonaktifkan.
-  // Risiko diterima; tidak diubah pada iterasi ini per keputusan pemilik proyek.
   _httpClient.setInsecure();
   _httpClient.setHandshakeTimeout(10);
   return _httpClient;
@@ -605,7 +543,6 @@ void extendWdtForSync()
 {
   if (!hTaskRfid && !hTaskSync && !hTaskDisplay)
   {
-    Serial.println("[WDT] Tasks not ready, skip extend.");
     return;
   }
   portENTER_CRITICAL(&wdtMux);
@@ -626,10 +563,6 @@ void extendWdtForSync()
   if (hTaskDisplay)
     esp_task_wdt_delete(hTaskDisplay);
 
-  TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCore(0);
-  if (idle0)
-    esp_task_wdt_delete(idle0);
-
   esp_task_wdt_deinit();
 
   const esp_task_wdt_config_t cfg = {
@@ -646,15 +579,12 @@ void extendWdtForSync()
     esp_task_wdt_add(hTaskSync);
   if (hTaskDisplay)
     esp_task_wdt_add(hTaskDisplay);
-
-  Serial.println("[WDT] Extended to 180s for sync/OTA.");
 }
 
 void restoreWdtNormal()
 {
   if (!hTaskRfid && !hTaskSync && !hTaskDisplay)
   {
-    Serial.println("[WDT] Tasks not ready, skip restore.");
     return;
   }
   portENTER_CRITICAL(&wdtMux);
@@ -675,10 +605,6 @@ void restoreWdtNormal()
   if (hTaskDisplay)
     esp_task_wdt_delete(hTaskDisplay);
 
-  TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCore(0);
-  if (idle0)
-    esp_task_wdt_delete(idle0);
-
   esp_task_wdt_deinit();
 
   const esp_task_wdt_config_t cfg = {
@@ -695,8 +621,6 @@ void restoreWdtNormal()
     esp_task_wdt_add(hTaskSync);
   if (hTaskDisplay)
     esp_task_wdt_add(hTaskDisplay);
-
-  Serial.println("[WDT] Restored to 90s normal.");
 }
 
 void turnOffOLED()
@@ -999,17 +923,14 @@ void clearRfidCache()
 
 bool loadRfidCacheFromFileLocked()
 {
-  Serial.println("[RFID] Loading RFID cache from file...");
   clearRfidCache();
   if (!sd.exists(RFID_DB_FILE))
   {
-    Serial.println("[RFID] rfid_db.txt not found.");
     return false;
   }
   FsFile f;
   if (!f.open(RFID_DB_FILE, O_RDONLY))
   {
-    Serial.println("[RFID] Failed to open rfid_db.txt.");
     return false;
   }
   char line[12];
@@ -1032,7 +953,6 @@ bool loadRfidCacheFromFileLocked()
     rfidCacheFlat[idx][10] = '\0';
     idx++;
   }
-  // GAP-11: deteksi entri yang terpotong karena melebihi RFID_CACHE_MAX.
   if (idx >= RFID_CACHE_MAX)
   {
     long discarded = 0;
@@ -1046,15 +966,11 @@ bool loadRfidCacheFromFileLocked()
       if (len == 10)
         discarded++;
     }
-    if (discarded > 0)
-      Serial.printf("[RFID] PERINGATAN: %ld entri RFID terpotong (melebihi RFID_CACHE_MAX=%d).\n",
-                    discarded, RFID_CACHE_MAX);
   }
   f.close();
   rfidCacheCount = idx;
   rfidCacheLoaded = (idx > 0);
   rfidDbValid = (idx > 0);
-  Serial.printf("[RFID] Cache loaded: %d entries, valid=%d\n", rfidCacheCount, rfidDbValid);
   return rfidDbValid;
 }
 
@@ -1083,22 +999,18 @@ bool isRfidInCache(const char *rfid)
 
 void loadAdminRfidList()
 {
-  Serial.println("[ADMIN] Loading admin RFID list...");
   adminRfidCount = 0;
   if (!sdCardAvailable)
   {
-    Serial.println("[ADMIN] SD not available, skip.");
     return;
   }
   if (!acquireSD())
   {
-    Serial.println("[ADMIN] SD mutex timeout.");
     return;
   }
   selectSD();
   if (!sd.exists(ADMIN_RFID_FILE))
   {
-    Serial.println("[ADMIN] admin_rfid.txt not found.");
     deselectSD();
     releaseSD();
     return;
@@ -1106,7 +1018,6 @@ void loadAdminRfidList()
   FsFile f;
   if (!f.open(ADMIN_RFID_FILE, O_RDONLY))
   {
-    Serial.println("[ADMIN] Failed to open admin_rfid.txt.");
     deselectSD();
     releaseSD();
     return;
@@ -1126,7 +1037,6 @@ void loadAdminRfidList()
   f.close();
   deselectSD();
   releaseSD();
-  Serial.printf("[ADMIN] Admin RFID loaded: %d entries\n", adminRfidCount);
 }
 
 bool isAdminRfid(const char *rfid)
@@ -1139,7 +1049,6 @@ bool isAdminRfid(const char *rfid)
 
 void handleAdminScan(const char *rfid)
 {
-  Serial.printf("[ADMIN] Admin scan: rfid=%s\n", rfid);
   (void)rfid;
   showOLED(F("ADMIN MODE"), "SYNC + STATUS");
   playToneNotify();
@@ -1149,7 +1058,6 @@ void handleAdminScan(const char *rfid)
   delay(2000);
   if (isWifiConnected())
   {
-    Serial.println("[ADMIN] Triggering manual sync...");
     pendingCacheDirty = true;
     syncState.inProgress = false;
     syncState.currentFile = 0;
@@ -1189,10 +1097,8 @@ void getFormattedTimestamp(char *buf, size_t sz)
 
 bool syncTimeWithFallback()
 {
-  Serial.println("[NTP] Syncing time...");
   if (isSignalCritical())
   {
-    Serial.println("[NTP] Signal critical, abort.");
     return false;
   }
   const char *servers[] = {NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3};
@@ -1200,7 +1106,6 @@ bool syncTimeWithFallback()
   {
     char srv[32];
     strcpy_P(srv, servers[i]);
-    Serial.printf("[NTP] Trying server: %s\n", srv);
     configTime(GMT_OFFSET_SEC, 0, srv);
     struct tm ti;
     unsigned long t0 = millis();
@@ -1219,16 +1124,13 @@ bool syncTimeWithFallback()
         }
         char buf[6];
         snprintf(buf, sizeof(buf), "%02d:%02d", ti.tm_hour, ti.tm_min);
-        Serial.printf("[NTP] Sync OK: %s\n", buf);
         showOLED(F("WAKTU TERSYNC"), buf);
         delay(1000);
         return true;
       }
       delay(100);
     }
-    Serial.printf("[NTP] Server %s timeout.\n", srv);
   }
-  Serial.println("[NTP] All NTP servers failed.");
   return false;
 }
 
@@ -1249,7 +1151,7 @@ void checkOLEDSchedule()
   struct tm ti;
   if (!getTimeWithFallback(&ti))
     return;
-  RuntimeConfig cfg = getRuntimeConfigSnapshot(); // GAP-12
+  RuntimeConfig cfg = getRuntimeConfigSnapshot();
   int h = ti.tm_hour;
   if (h >= cfg.dimStartHour && h < cfg.dimEndHour)
     turnOffOLED();
@@ -1290,16 +1192,13 @@ void appendFailedLogToSD(const char *rfid, const char *ts, const char *reason)
       logFile.println(reason);
       logFile.sync();
       logFile.close();
-      Serial.printf("[LOG] Failed log written: rfid=%s reason=%s\n", rfid, reason);
     }
     else
     {
-      Serial.println("[LOG] Failed to open failed_log.csv for append.");
     }
   }
   else
   {
-    Serial.println("[LOG] failed_log.csv at max lines, skipping.");
   }
   deselectSD();
   releaseSD();
@@ -1377,7 +1276,6 @@ void loadMetadataLocked()
 
 bool reinitSDCard()
 {
-  Serial.println("[SD] Re-initializing SD card...");
   if (file.isOpen())
     file.close();
   sd.end();
@@ -1386,7 +1284,6 @@ bool reinitSDCard()
   delay(10);
   bool ok = sd.begin(PIN_SD_CS, SD_SCK_MHZ(10));
   deselectSD();
-  Serial.printf("[SD] reinit result=%d\n", ok);
   return ok;
 }
 
@@ -1397,14 +1294,12 @@ void checkSDHealth()
   timers.lastSDRedetect = millis();
   if (!sdCardAvailable)
   {
-    Serial.println("[SD] SD not available, attempting re-detect...");
     if (!acquireSD(pdMS_TO_TICKS(1000)))
       return;
     bool ok = reinitSDCard();
     releaseSD();
     if (ok)
     {
-      Serial.println("[SD] SD card re-detected OK.");
       sdCardAvailable = true;
       pendingCacheDirty = true;
       showOLED(F("SD CARD"), "TERBACA KEMBALI");
@@ -1415,7 +1310,6 @@ void checkSDHealth()
     }
     else
     {
-      Serial.println("[SD] SD card still not available.");
     }
     return;
   }
@@ -1427,7 +1321,6 @@ void checkSDHealth()
   releaseSD();
   if (!healthy)
   {
-    Serial.println("[SD] SD health check FAILED — card removed?");
     sdCardAvailable = false;
     clearRfidCache();
     showOLED(F("SD CARD"), "TERLEPAS!");
@@ -1538,7 +1431,6 @@ int countAllOfflineRecords()
       emptyStreak++;
       if (emptyStreak >= 50)
       {
-        Serial.println("[COUNT] 50 consecutive empty slots, stopping count.");
         break;
       }
       continue;
@@ -1547,7 +1439,6 @@ int countAllOfflineRecords()
     int validCnt = countValidRecordsInFileLocked(fn);
     if (validCnt == 0)
     {
-      Serial.printf("[COUNT] File %s empty/expired, removing.\n", fn);
       sd.remove(fn);
       continue;
     }
@@ -1630,10 +1521,8 @@ bool isDuplicateLocked(const char *rfid, unsigned long t)
       {
         ft = strtoul(c3 + 1, nullptr, 10);
       }
-      Serial.printf("dupCheck: t=%lu ft=%lu diff=%ld interval=%lu\n", t, ft, (long)(t - ft), MIN_REPEAT_INTERVAL);
       if (strcmp(tmp, rfid) == 0 && ft > 0 && t >= ft && (t - ft) < MIN_REPEAT_INTERVAL)
       {
-        Serial.println("dupCheck: DUPLIKAT DITEMUKAN!");
         found = true;
         break;
       }
@@ -1648,7 +1537,6 @@ bool isDuplicateLocked(const char *rfid, unsigned long t)
 
 bool initSDCard()
 {
-  Serial.println("[SD] Initializing SD card...");
   pinMode(PIN_SD_CS, OUTPUT);
   pinMode(PIN_RFID_SS, OUTPUT);
   deselectSD();
@@ -1658,7 +1546,6 @@ bool initSDCard()
   if (!sd.begin(PIN_SD_CS, SD_SCK_MHZ(10)))
   {
     deselectSD();
-    Serial.println("[SD] sd.begin() FAILED.");
     return false;
   }
   loadMetadataLocked();
@@ -1678,7 +1565,6 @@ bool initSDCard()
           file.println(F("rfid,timestamp,device_id,unix_time,crc8"));
           file.close();
           currentQueueFile = i;
-          Serial.printf("[SD] Created new queue file: %s\n", fn);
           break;
         }
       }
@@ -1687,8 +1573,6 @@ bool initSDCard()
         int cnt = countValidRecordsInFileLocked(fn);
         if (cnt == 0)
         {
-
-          Serial.printf("[SD] File %s all expired, reusing slot.\n", fn);
           sd.remove(fn);
           if (file.open(fn, O_WRONLY | O_CREAT))
           {
@@ -1701,7 +1585,6 @@ bool initSDCard()
         else if (cnt < MAX_RECORDS_PER_FILE)
         {
           currentQueueFile = i;
-          Serial.printf("[SD] Resuming queue file: %s (validCnt=%d)\n", fn, cnt);
           break;
         }
       }
@@ -1709,18 +1592,13 @@ bool initSDCard()
     if (currentQueueFile == -1)
     {
       currentQueueFile = 0;
-      Serial.println("[SD] WARNING: no suitable queue file found, defaulting to 0.");
     }
     rtcQueueFileValid = true;
   }
   deselectSD();
-  Serial.printf("[SD] SD init OK. currentQueueFile=%d\n", currentQueueFile);
   return true;
 }
 
-// GAP-09: mencari slot antrian kosong/dapat dipakai ulang mulai dari startIdx,
-// mengganti logika lama yang hanya memeriksa satu file berikutnya lalu langsung
-// menyatakan QUEUE FULL. Harus dipanggil saat SD sudah diselect dan mutex sudah diambil.
 bool findAvailableQueueSlotLocked(int startIdx, int *outIdx)
 {
   char fn[20];
@@ -1738,7 +1616,6 @@ bool findAvailableQueueSlotLocked(int startIdx, int *outIdx)
     int cnt = countValidRecordsInFileLocked(fn);
     if (cnt == 0)
     {
-      Serial.printf("[QUEUE] Slot %s kosong/kadaluwarsa, dipakai ulang.\n", fn);
       sd.remove(fn);
       *outIdx = idx;
       return true;
@@ -1754,24 +1631,19 @@ bool findAvailableQueueSlotLocked(int startIdx, int *outIdx)
 
 SaveResult saveToQueue(const char *rfid, const char *ts, unsigned long t)
 {
-  Serial.printf("[QUEUE] saveToQueue: rfid=%s ts=%s t=%lu\n", rfid, ts, t);
   if (!sdCardAvailable)
   {
-    Serial.println("[QUEUE] SD not available.");
     return SAVE_SD_ERROR;
   }
   if (!acquireSD())
   {
-    Serial.println("[QUEUE] SD mutex timeout.");
     return SAVE_SD_ERROR;
   }
   selectSD();
 
   bool dup = isDuplicateLocked(rfid, t);
-  Serial.printf("saveToQueue: rfid=%s t=%lu isDup=%d currentFile=%d\n", rfid, t, dup, currentQueueFile);
   if (dup)
   {
-    Serial.println("[QUEUE] Duplicate detected, not saving.");
     deselectSD();
     releaseSD();
     return SAVE_DUPLICATE;
@@ -1784,7 +1656,6 @@ SaveResult saveToQueue(const char *rfid, const char *ts, unsigned long t)
   getQueueFileName(currentQueueFile, curFn, sizeof(curFn));
   if (!sd.exists(curFn))
   {
-    Serial.printf("[QUEUE] Creating new queue file: %s\n", curFn);
     if (file.open(curFn, O_WRONLY | O_CREAT))
     {
       file.println(F("rfid,timestamp,device_id,unix_time,crc8"));
@@ -1792,26 +1663,20 @@ SaveResult saveToQueue(const char *rfid, const char *ts, unsigned long t)
     }
   }
   int curCnt = countRecordsInFileLocked(curFn);
-  Serial.printf("[QUEUE] Current file %s has %d records.\n", curFn, curCnt);
   if (curCnt >= MAX_RECORDS_PER_FILE)
   {
-    // GAP-09: pencarian slot antrian bertingkat, tidak lagi hanya memeriksa satu file berikutnya.
     int nextIdx;
     int startSearch = (currentQueueFile + 1) % MAX_QUEUE_FILES;
     if (!findAvailableQueueSlotLocked(startSearch, &nextIdx))
     {
-      Serial.printf("[QUEUE] Tidak ditemukan slot kosong dalam %d percobaan sejak file %d, QUEUE FULL.\n",
-                    QUEUE_SLOT_SEARCH_LIMIT, currentQueueFile);
       deselectSD();
       releaseSD();
       return SAVE_QUEUE_FULL;
     }
     currentQueueFile = nextIdx;
     getQueueFileName(currentQueueFile, curFn, sizeof(curFn));
-    Serial.printf("[QUEUE] Rolling to queue file: %s\n", curFn);
     if (!file.open(curFn, O_WRONLY | O_CREAT))
     {
-      Serial.println("[QUEUE] Failed to open next queue file.");
       deselectSD();
       releaseSD();
       return SAVE_SD_ERROR;
@@ -1821,7 +1686,6 @@ SaveResult saveToQueue(const char *rfid, const char *ts, unsigned long t)
   }
   if (!file.open(curFn, O_WRONLY | O_APPEND))
   {
-    Serial.printf("[QUEUE] Failed to open %s for append.\n", curFn);
     deselectSD();
     releaseSD();
     return SAVE_SD_ERROR;
@@ -1848,22 +1712,18 @@ SaveResult saveToQueue(const char *rfid, const char *ts, unsigned long t)
   pendingCacheDirty = false;
   saveMetadataLocked();
   releaseSD();
-  Serial.printf("[QUEUE] Record saved. cachedPending=%d\n", cachedPendingRecords);
   return SAVE_OK;
 }
 
 bool nvsSyncToServer()
 {
   int cnt = nvsGetCount();
-  Serial.printf("[NVS_SYNC] Starting NVS sync: %d records...\n", cnt);
   if (cnt == 0)
   {
-    Serial.println("[NVS_SYNC] Nothing to sync.");
     return true;
   }
   if (isSignalCritical())
   {
-    Serial.println("[NVS_SYNC] Signal critical, abort.");
     return false;
   }
   HTTPClient http;
@@ -1874,7 +1734,6 @@ bool nvsSyncToServer()
   strcat(url, "/api/presensi/sync-bulk");
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("[NVS_SYNC] http.begin failed.");
     return false;
   }
   http.addHeader(F("Content-Type"), F("application/json"));
@@ -1900,7 +1759,6 @@ bool nvsSyncToServer()
   int code = http.POST(payload);
   esp_task_wdt_reset();
   taskYIELD();
-  Serial.printf("[NVS_SYNC] HTTP POST result: %d\n", code);
   if (code == 200)
   {
     String body = http.getString();
@@ -1913,18 +1771,15 @@ bool nvsSyncToServer()
         const char *st = item["status"] | "error";
         if (strcmp(st, "error") == 0)
         {
-          Serial.printf("[NVS_SYNC] Server error for rfid=%s: %s\n", item["rfid"] | "?", item["message"] | "?");
           appendFailedLogToSD(item["rfid"] | "unknown", item["timestamp"] | "unknown", item["message"] | "UNKNOWN");
         }
       }
     nvsSetCount(0);
     for (int i = 0; i < cnt; i++)
       nvsDeleteRecord(i);
-    Serial.println("[NVS_SYNC] NVS sync complete, buffer cleared.");
     return true;
   }
   http.end();
-  Serial.printf("[NVS_SYNC] Sync FAILED, HTTP code=%d\n", code);
   return false;
 }
 
@@ -1957,10 +1812,8 @@ unsigned long checkRfidDbVersion()
 
 bool downloadRfidDb()
 {
-  Serial.println("[RFID_DB] Downloading RFID DB...");
   if (isSignalWeak() || !sdCardAvailable)
   {
-    Serial.println("[RFID_DB] Signal weak or no SD, abort.");
     return false;
   }
   showOLED(F("RFID DB"), "MENGUNDUH...");
@@ -1972,16 +1825,13 @@ bool downloadRfidDb()
   strcat(url, "/api/presensi/rfid-list");
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("[RFID_DB] http.begin failed.");
     return false;
   }
   http.addHeader(F("X-API-KEY"), apiKey);
   int code = http.GET();
-  Serial.printf("[RFID_DB] HTTP GET result: %d\n", code);
   if (code != 200)
   {
     http.end();
-    Serial.println("[RFID_DB] Download FAILED.");
     showOLED(F("RFID DB"), "GAGAL UNDUH");
     playToneError();
     delay(800);
@@ -1999,7 +1849,6 @@ bool downloadRfidDb()
   FsFile dbf;
   if (!dbf.open(tmpPath, O_WRONLY | O_CREAT | O_TRUNC))
   {
-    Serial.println("[RFID_DB] Failed to open temp file.");
     deselectSD();
     releaseSD();
     http.end();
@@ -2008,24 +1857,33 @@ bool downloadRfidDb()
   WiFiClient *stream = http.getStreamPtr();
   int total = http.getSize();
   int written = 0;
+  long bytesRead = 0;
+  unsigned long lastDataAt = millis();
   unsigned long serverVer = 0;
   bool firstLine = true;
   char lineBuf[32];
   int lbPos = 0;
-  bool lineTruncated = false; // GAP-15
-  int truncatedLineCount = 0; // GAP-15
+  bool lineTruncated = false;
+  int truncatedLineCount = 0;
   uint8_t chunk[256];
-  while (http.connected() && (total < 0 || written < total))
+
+  while (http.connected() && (total <= 0 || bytesRead < total))
   {
     esp_task_wdt_reset();
     taskYIELD();
     int avail = stream->available();
     if (!avail)
     {
+      if (millis() - lastDataAt > 15000UL)
+      {
+        break;
+      }
       vTaskDelay(pdMS_TO_TICKS(5));
       continue;
     }
+    lastDataAt = millis();
     int rd = stream->readBytes(chunk, min(avail, (int)sizeof(chunk)));
+    bytesRead += rd;
     for (int i = 0; i < rd; i++)
     {
       char c = (char)chunk[i];
@@ -2046,7 +1904,6 @@ bool downloadRfidDb()
           if (strncmp(lineBuf, "ver:", 4) == 0)
           {
             serverVer = strtoul(lineBuf + 4, nullptr, 10);
-            Serial.printf("[RFID_DB] Server DB version: %lu\n", serverVer);
             continue;
           }
         }
@@ -2069,7 +1926,7 @@ bool downloadRfidDb()
         if (lbPos < (int)sizeof(lineBuf) - 1)
           lineBuf[lbPos++] = c;
         else
-          lineTruncated = true; // GAP-15: karakter berikutnya dibuang, tandai baris ini terpotong
+          lineTruncated = true;
       }
     }
   }
@@ -2082,13 +1939,14 @@ bool downloadRfidDb()
   loadRfidCacheFromFileLocked();
   deselectSD();
   releaseSD();
+  if (serverVer == 0 && written > 0)
+  {
+    unsigned long fallbackVer = checkRfidDbVersion();
+    if (fallbackVer > 0)
+      serverVer = fallbackVer;
+  }
   if (serverVer > 0)
     nvsSetRfidDbVer(serverVer);
-  // GAP-15: laporkan jika ada baris yang terpotong melebihi buffer saat unduh.
-  if (truncatedLineCount > 0)
-    Serial.printf("[RFID_DB] PERINGATAN: %d baris terpotong melebihi buffer %d byte saat unduh.\n",
-                  truncatedLineCount, (int)sizeof(lineBuf));
-  Serial.printf("[RFID_DB] Download complete: %d entries written, ver=%lu\n", written, serverVer);
   char buf[20];
   snprintf(buf, sizeof(buf), "%d RFID", written);
   showOLED(F("RFID DB"), buf);
@@ -2105,10 +1963,8 @@ void checkAndUpdateRfidDb()
     return;
   timers.lastRfidDbCheck = millis();
   unsigned long local = nvsGetRfidDbVer(), server = checkRfidDbVersion();
-  Serial.printf("[RFID_DB] Version check: local=%lu server=%lu\n", local, server);
   if (server == 0 || server <= local)
   {
-    Serial.println("[RFID_DB] DB up to date, skip download.");
     return;
   }
   downloadRfidDb();
@@ -2121,7 +1977,6 @@ void sendTelemetry()
   if (millis() - timers.lastTelemetry < TELEMETRY_INTERVAL)
     return;
   timers.lastTelemetry = millis();
-  Serial.println("[TELE] Sending telemetry heartbeat...");
   HTTPClient http;
   http.setTimeout(8000);
   http.setConnectTimeout(5000);
@@ -2130,7 +1985,6 @@ void sendTelemetry()
   strcat(url, "/api/presensi/heartbeat");
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("[TELE] http.begin failed.");
     return;
   }
   http.addHeader(F("Content-Type"), F("application/json"));
@@ -2151,7 +2005,6 @@ void sendTelemetry()
   serializeJson(doc, payload);
   int code = http.POST(payload);
   http.end();
-  Serial.printf("[TELE] Heartbeat sent, HTTP=%d\n", code);
 }
 
 void fetchRemoteConfig()
@@ -2161,7 +2014,6 @@ void fetchRemoteConfig()
   if (millis() - timers.lastRemoteConfig < REMOTE_CONFIG_INTERVAL)
     return;
   timers.lastRemoteConfig = millis();
-  Serial.println("[CFG] Fetching remote config...");
   HTTPClient http;
   http.setTimeout(8000);
   http.setConnectTimeout(5000);
@@ -2169,12 +2021,10 @@ void fetchRemoteConfig()
   snprintf(url, sizeof(url), "%s/api/presensi/config?device_id=%s", apiBaseUrl, deviceId);
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("[CFG] http.begin failed.");
     return;
   }
   http.addHeader(F("X-API-KEY"), apiKey);
   int code = http.GET();
-  Serial.printf("[CFG] Remote config HTTP=%d\n", code);
   if (code != 200)
   {
     http.end();
@@ -2185,12 +2035,11 @@ void fetchRemoteConfig()
   DynamicJsonDocument doc(512);
   if (deserializeJson(doc, body) != DeserializationError::Ok)
   {
-    Serial.println("[CFG] JSON parse error.");
     return;
   }
 
-  bool changed = false;     // GAP-18
-  RuntimeConfig snapshot{}; // GAP-18
+  bool changed = false;
+  RuntimeConfig snapshot{};
 
   if (xConfigMutex && xSemaphoreTake(xConfigMutex, pdMS_TO_TICKS(500)) == pdTRUE)
   {
@@ -2198,57 +2047,44 @@ void fetchRemoteConfig()
     {
       rtCfg.sleepStartHour = doc["sleep_start"];
       changed = true;
-      Serial.printf("[CFG] sleep_start=%d\n", rtCfg.sleepStartHour);
     }
     if (doc.containsKey("sleep_end"))
     {
       rtCfg.sleepEndHour = doc["sleep_end"];
       changed = true;
-      Serial.printf("[CFG] sleep_end=%d\n", rtCfg.sleepEndHour);
     }
     if (doc.containsKey("oled_dim_start"))
     {
       rtCfg.dimStartHour = doc["oled_dim_start"];
       changed = true;
-      Serial.printf("[CFG] dim_start=%d\n", rtCfg.dimStartHour);
     }
     if (doc.containsKey("oled_dim_end"))
     {
       rtCfg.dimEndHour = doc["oled_dim_end"];
       changed = true;
-      Serial.printf("[CFG] dim_end=%d\n", rtCfg.dimEndHour);
     }
     if (doc.containsKey("sync_interval_ms"))
     {
       rtCfg.syncIntervalMs = doc["sync_interval_ms"];
       changed = true;
-      Serial.printf("[CFG] sync_iv=%lu\n", rtCfg.syncIntervalMs);
     }
     if (doc.containsKey("ota_check_interval_ms"))
     {
       rtCfg.otaCheckIntervalMs = doc["ota_check_interval_ms"];
       changed = true;
-      Serial.printf("[CFG] ota_iv=%lu\n", rtCfg.otaCheckIntervalMs);
     }
-    snapshot = rtCfg; // GAP-18
+    snapshot = rtCfg;
     xSemaphoreGive(xConfigMutex);
-    Serial.println("[CFG] Remote config applied.");
   }
   else
   {
-    Serial.println("[CFG] PERINGATAN: gagal ambil xConfigMutex, remote config TIDAK diterapkan siklus ini.");
     return;
   }
 
-  // GAP-18: persist di luar mutex agar penulisan flash NVS tidak menahan task lain.
   if (changed)
     persistRuntimeConfigToNvs(snapshot);
 }
 
-// GAP-07: pembanding versi semantik (major.minor.patch), menggantikan strcmp leksikal
-// yang salah untuk kasus seperti "2.10.0" vs "2.9.0".
-// TODO: GAP-07 ASUMSI - format versi selalu "X.Y.Z" numerik dipisah titik, maksimum 3 komponen.
-// Mengembalikan: <0 jika a < b, 0 jika sama, >0 jika a > b.
 static int compareFirmwareVersion(const char *a, const char *b)
 {
   int aMaj = 0, aMin = 0, aPat = 0;
@@ -2268,12 +2104,10 @@ void checkOtaUpdate()
 {
   if (isSignalWeak())
     return;
-  // GAP-12: snapshot rtCfg, hindari race dengan fetchRemoteConfig() pada task yang sama.
   RuntimeConfig cfg = getRuntimeConfigSnapshot();
   if (millis() - timers.lastOtaCheck < cfg.otaCheckIntervalMs)
     return;
   timers.lastOtaCheck = millis();
-  Serial.println("[OTA] Checking for firmware update...");
   HTTPClient http;
   http.setTimeout(8000);
   http.setConnectTimeout(5000);
@@ -2282,7 +2116,6 @@ void checkOtaUpdate()
   strcat(url, "/api/presensi/firmware/check");
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("[OTA] http.begin failed.");
     return;
   }
   http.addHeader(F("Content-Type"), F("application/json"));
@@ -2290,7 +2123,6 @@ void checkOtaUpdate()
   char payload[80];
   snprintf(payload, sizeof(payload), "{\"version\":\"%s\",\"device_id\":\"%s\"}", FIRMWARE_VERSION, deviceId);
   int code = http.POST(payload);
-  Serial.printf("[OTA] Check HTTP=%d\n", code);
   if (code != 200)
   {
     http.end();
@@ -2301,27 +2133,22 @@ void checkOtaUpdate()
   DynamicJsonDocument doc(512);
   if (deserializeJson(doc, body) != DeserializationError::Ok)
   {
-    Serial.println("[OTA] JSON parse error.");
     return;
   }
   bool hasUpdate = doc["update"] | false;
   const char *ver = doc["version"] | "";
   const char *burl = doc["url"] | "";
   const char *md5 = doc["md5"] | "";
-  Serial.printf("[OTA] hasUpdate=%d ver=%s\n", hasUpdate, ver);
   if (!hasUpdate || !strlen(ver) || !strlen(burl))
     return;
-  // GAP-07: pembanding versi semantik menggantikan strcmp leksikal.
   if (compareFirmwareVersion(ver, FIRMWARE_VERSION) <= 0)
   {
-    Serial.printf("[OTA] Versi server (%s) tidak lebih baru dari versi lokal (%s).\n", ver, FIRMWARE_VERSION);
     return;
   }
   strncpy(otaState.version, ver, sizeof(otaState.version) - 1);
   strncpy(otaState.url, burl, sizeof(otaState.url) - 1);
   strncpy(otaState.md5, md5, sizeof(otaState.md5) - 1);
   otaState.updateAvailable = true;
-  Serial.printf("[OTA] Update available: v%s url=%s\n", otaState.version, otaState.url);
   char buf[20];
   snprintf(buf, sizeof(buf), "v%s TERSEDIA", otaState.version);
   showOLED(F("UPDATE"), buf);
@@ -2333,7 +2160,6 @@ void performOtaUpdate()
 {
   if (!otaState.updateAvailable || isSignalWeak())
     return;
-  Serial.printf("[OTA] Starting OTA update to v%s...\n", otaState.version);
   char buf[20];
   snprintf(buf, sizeof(buf), "v%s", otaState.version);
   showOLED(F("UPDATE OTA"), buf);
@@ -2348,11 +2174,9 @@ void performOtaUpdate()
   http.addHeader(F("X-API-KEY"), apiKey);
   http.setTimeout(60000);
   int code = http.GET();
-  Serial.printf("[OTA] Download HTTP=%d\n", code);
   if (code != 200)
   {
     snprintf(buf, sizeof(buf), "HTTP ERR %d", code);
-    Serial.printf("[OTA] Download FAILED: %s\n", buf);
     showOLED(F("UPDATE GAGAL"), buf);
     playToneError();
     http.end();
@@ -2361,16 +2185,11 @@ void performOtaUpdate()
     return;
   }
   int total = http.getSize();
-  Serial.printf("[OTA] Firmware size: %d bytes\n", total);
   WiFiClient *stream = http.getStreamPtr();
 
-  // GAP-08: total dapat -1 jika server tidak mengirim Content-Length (chunked transfer).
-  // Sebelumnya (size_t)(-1) menjadi nilai raksasa dan dikirim langsung ke Update.begin().
-  // TODO: verifikasi konstanta UPDATE_SIZE_UNKNOWN terhadap Update.h versi ESP32 core 3.3.10 terpasang.
   size_t updateSize;
   if (total <= 0)
   {
-    Serial.println("[OTA] Content-Length tidak tersedia, menggunakan UPDATE_SIZE_UNKNOWN.");
     updateSize = UPDATE_SIZE_UNKNOWN;
   }
   else
@@ -2380,7 +2199,6 @@ void performOtaUpdate()
 
   if (!Update.begin(updateSize))
   {
-    Serial.println("[OTA] Update.begin FAILED — not enough space.");
     showOLED(F("UPDATE GAGAL"), "NO SPACE");
     playToneError();
     http.end();
@@ -2391,15 +2209,9 @@ void performOtaUpdate()
   if (strlen(otaState.md5) > 0)
   {
     Update.setMD5(otaState.md5);
-    Serial.printf("[OTA] Expected MD5: %s\n", otaState.md5);
   }
   uint8_t buff[1024];
   int written = 0;
-  // GAP-08: kondisi loop diperbaiki agar tetap membaca stream saat total tidak diketahui (<=0).
-  // Sebelumnya "written < total" dengan total=-1 membuat loop TIDAK PERNAH BERJALAN (0 < -1 = false),
-  // sehingga OTA dengan respons chunked akan gagal total secara diam-diam.
-  // TODO: ASUMSI - penanganan HTTPClient terhadap Transfer-Encoding: chunked belum diverifikasi
-  // di lapangan untuk kasus total<=0; perlu pengujian langsung terhadap endpoint OTA backend.
   while (http.connected() && (total <= 0 || written < total))
   {
     int avail = stream->available();
@@ -2414,10 +2226,8 @@ void performOtaUpdate()
     vTaskDelay(pdMS_TO_TICKS(1));
   }
   http.end();
-  Serial.printf("[OTA] Written: %d / %d bytes\n", written, total);
   if (Update.end() && Update.isFinished())
   {
-    Serial.println("[OTA] Update finished successfully. Restarting...");
     showOLED(F("UPDATE OK"), "RESTART...");
     playToneSuccess();
     delay(2000);
@@ -2426,7 +2236,6 @@ void performOtaUpdate()
   }
   else
   {
-    Serial.printf("[OTA] Update.end FAILED, error=%d\n", Update.getError());
     snprintf(buf, sizeof(buf), "ERR %d", Update.getError());
     showOLED(F("UPDATE GAGAL"), buf);
     playToneError();
@@ -2498,10 +2307,8 @@ bool readQueueFileLocked(const char *fn, OfflineRecord *recs, int *cnt, int maxC
 
 SyncFileResult syncQueueFile(const char *fn)
 {
-  Serial.printf("[SYNC] Syncing file: %s\n", fn);
   if (!sdCardAvailable || !isWifiConnected())
   {
-    Serial.println("[SYNC] No SD or no WiFi, abort.");
     return SYNC_FILE_NO_WIFI;
   }
   OfflineRecord recs[MAX_RECORDS_PER_FILE];
@@ -2510,7 +2317,6 @@ SyncFileResult syncQueueFile(const char *fn)
     return SYNC_FILE_HTTP_FAIL;
   selectSD();
   bool hasData = readQueueFileLocked(fn, recs, &validCnt, MAX_RECORDS_PER_FILE);
-  Serial.printf("[SYNC] File %s: hasData=%d validCnt=%d\n", fn, hasData, validCnt);
   if (!hasData || validCnt == 0)
   {
     if (sd.exists(fn))
@@ -2518,7 +2324,6 @@ SyncFileResult syncQueueFile(const char *fn)
     deselectSD();
     releaseSD();
     pendingCacheDirty = true;
-    Serial.println("[SYNC] File empty, removed.");
     return SYNC_FILE_EMPTY;
   }
   deselectSD();
@@ -2531,7 +2336,6 @@ SyncFileResult syncQueueFile(const char *fn)
   strcat(url, "/api/presensi/sync-bulk");
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("[SYNC] http.begin failed.");
     return SYNC_FILE_HTTP_FAIL;
   }
   http.addHeader(F("Content-Type"), F("application/json"));
@@ -2554,7 +2358,6 @@ SyncFileResult syncQueueFile(const char *fn)
   int code = http.POST(payload);
   esp_task_wdt_reset();
   taskYIELD();
-  Serial.printf("[SYNC] HTTP POST result: %d\n", code);
   if (code == 200)
   {
     String body = http.getString();
@@ -2567,7 +2370,6 @@ SyncFileResult syncQueueFile(const char *fn)
         const char *st = item["status"] | "error";
         if (strcmp(st, "error") == 0)
         {
-          Serial.printf("[SYNC] Server error for rfid=%s: %s\n", item["rfid"] | "?", item["message"] | "?");
           appendFailedLogToSD(item["rfid"] | "unknown", item["timestamp"] | "unknown", item["message"] | "UNKNOWN");
         }
       }
@@ -2582,17 +2384,14 @@ SyncFileResult syncQueueFile(const char *fn)
       cachedPendingRecords -= validCnt;
     else
       cachedPendingRecords = 0;
-    Serial.printf("[SYNC] File %s synced OK. pendingRecords=%d\n", fn, cachedPendingRecords);
     return SYNC_FILE_OK;
   }
   http.end();
   if (!isWifiConnected())
   {
-    Serial.println("[SYNC] WiFi lost during sync.");
     syncState.inProgress = false;
     return SYNC_FILE_NO_WIFI;
   }
-  Serial.printf("[SYNC] HTTP FAIL code=%d\n", code);
   return SYNC_FILE_HTTP_FAIL;
 }
 
@@ -2600,11 +2399,9 @@ bool syncQueueFileWithRetry(const char *fn)
 {
   for (int attempt = 0; attempt <= MAX_SYNC_RETRIES; attempt++)
   {
-    Serial.printf("[SYNC] Attempt %d/%d for %s\n", attempt + 1, MAX_SYNC_RETRIES + 1, fn);
     esp_task_wdt_reset();
     if (!isWifiConnected())
     {
-      Serial.println("[SYNC] WiFi lost, abort retry.");
       syncState.inProgress = false;
       return false;
     }
@@ -2620,7 +2417,6 @@ bool syncQueueFileWithRetry(const char *fn)
     {
       char buf[20];
       snprintf(buf, sizeof(buf), "RETRY %d/%d...", attempt + 1, MAX_SYNC_RETRIES);
-      Serial.printf("[SYNC] Retry %d/%d for %s\n", attempt + 1, MAX_SYNC_RETRIES, fn);
       showOLED(F("SYNC ULANG"), buf);
       unsigned long end = millis() + SYNC_RETRY_DELAY_MS * (1UL << attempt);
       while (millis() < end)
@@ -2630,7 +2426,6 @@ bool syncQueueFileWithRetry(const char *fn)
       }
     }
   }
-  Serial.printf("[SYNC] All retries failed for %s\n", fn);
   return false;
 }
 
@@ -2638,14 +2433,12 @@ void chunkedSync()
 {
   if (!sdCardAvailable || !isWifiConnected())
   {
-    Serial.println("[SYNC] chunkedSync: no SD or no WiFi.");
     syncState.inProgress = false;
     return;
   }
   extendWdtForSync();
   if (!syncState.inProgress)
   {
-    Serial.println("[SYNC] Starting new chunked sync session...");
     syncState.inProgress = true;
     syncState.currentFile = 0;
     syncState.startTime = millis();
@@ -2658,7 +2451,6 @@ void chunkedSync()
   {
     if (!isWifiConnected())
     {
-      Serial.println("[SYNC] WiFi lost during chunked sync.");
       syncState.inProgress = false;
       break;
     }
@@ -2678,7 +2470,6 @@ void chunkedSync()
       emptyStreak++;
       if (emptyStreak >= 20)
       {
-        Serial.println("[SYNC] 20 consecutive empty slots, ending sync.");
         syncState.currentFile = MAX_QUEUE_FILES;
         break;
       }
@@ -2689,8 +2480,6 @@ void chunkedSync()
     int nRecs = countValidRecordsInFileLocked(fn);
     if (nRecs == 0)
     {
-
-      Serial.printf("[SYNC] File %s empty/all expired, removing.\n", fn);
       sd.remove(fn);
       pendingCacheDirty = true;
       releaseSD();
@@ -2702,7 +2491,6 @@ void chunkedSync()
 
     char buf[24];
     snprintf(buf, sizeof(buf), "FILE %d (%d rec)", syncState.currentFile, nRecs);
-    Serial.printf("[SYNC] Processing file %d with %d valid records.\n", syncState.currentFile, nRecs);
     showOLED(F("SYNC"), buf);
     bool ok = syncQueueFileWithRetry(fn);
     syncState.filesProcessed++;
@@ -2719,8 +2507,6 @@ void chunkedSync()
   }
   if (syncState.currentFile >= MAX_QUEUE_FILES)
   {
-    Serial.printf("[SYNC] Chunked sync done. processed=%d succeeded=%d pending=%d\n",
-                  syncState.filesProcessed, syncState.filesSucceeded, cachedPendingRecords);
     syncState.inProgress = false;
     syncState.currentFile = 0;
     syncState.filesProcessed = 0;
@@ -2747,10 +2533,8 @@ void chunkedSync()
 
 bool connectToWifi(int ssidIdx)
 {
-  Serial.printf("[WIFI] Connecting to SSID[%d]: '%s'\n", ssidIdx, wifiCreds[ssidIdx].ssid);
   if (strlen(wifiCreds[ssidIdx].ssid) == 0)
   {
-    Serial.println("[WIFI] SSID empty, skip.");
     return false;
   }
   WiFi.mode(WIFI_STA);
@@ -2783,7 +2567,6 @@ bool connectToWifi(int ssidIdx)
   }
   if (isWifiConnected())
   {
-    Serial.printf("[WIFI] Connected! IP=%s RSSI=%ld dBm\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
     char buf[20];
     snprintf(buf, sizeof(buf), "RSSI: %ld dBm", WiFi.RSSI());
     showOLED(F("WIFI OK"), buf);
@@ -2792,63 +2575,46 @@ bool connectToWifi(int ssidIdx)
     delay(1500);
     return true;
   }
-  Serial.printf("[WIFI] Failed to connect to SSID[%d].\n", ssidIdx);
   isOnline = false;
   return false;
 }
 
 bool connectToWiFi()
 {
-  Serial.println("[WIFI] Trying all SSIDs...");
   for (int i = 0; i < 3; i++)
     if (connectToWifi(i))
       return true;
-  Serial.println("[WIFI] All SSIDs failed.");
   return false;
 }
 
 bool pingAPI()
 {
-  Serial.println("=== PING START ===");
-  Serial.printf("Signal: %d dBm\n", WiFi.RSSI());
-  Serial.printf("WiFi status: %d\n", WiFi.status());
-  Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
   if (isSignalCritical())
   {
-    Serial.println("PING: signal critical, abort");
     return false;
   }
   vTaskDelay(pdMS_TO_TICKS(1000));
-  Serial.println("PING: delay done, starting HTTP...");
   HTTPClient http;
   http.setTimeout(15000);
   http.setConnectTimeout(10000);
   char url[80];
   strcpy(url, apiBaseUrl);
   strcat(url, "/api/presensi/ping");
-  Serial.printf("PING: URL = %s\n", url);
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("PING: http.begin FAILED");
     return false;
   }
   http.addHeader(F("Content-Type"), F("application/json"));
   http.addHeader(F("X-API-KEY"), apiKey);
-  Serial.println("PING: calling http.GET...");
   esp_task_wdt_reset();
   int code = http.GET();
   esp_task_wdt_reset();
-  Serial.printf("PING: code = %d\n", code);
-  Serial.printf("PING: error = %s\n", http.errorToString(code).c_str());
   if (code > 0)
   {
     String body = http.getString();
-    Serial.printf("PING: body = %s\n", body.c_str());
   }
   http.end();
   isOnline = (code == 200);
-  Serial.printf("PING: isOnline = %d\n", isOnline);
-  Serial.println("=== PING END ===");
   return isOnline;
 }
 
@@ -2863,7 +2629,6 @@ void processReconnect()
       unsigned long elapsed = millis() - timers.lastReconnect;
       if (elapsed >= RECONNECT_INTERVAL)
       {
-        Serial.printf("[RECONNECT] Memulai reconnect (elapsed=%lums)...\n", elapsed);
         timers.lastReconnect = millis();
         reconnectState = RECONNECT_INIT;
       }
@@ -2873,7 +2638,6 @@ void processReconnect()
       if (!isOnline)
       {
         isOnline = true;
-        Serial.println("[RECONNECT] WiFi terdeteksi online dari IDLE.");
       }
     }
     break;
@@ -2939,9 +2703,6 @@ void processReconnect()
 
 void uidToString(uint8_t *uid, uint8_t len, char *out)
 {
-  // GAP-06: keputusan sadar - encoding 4-byte-pertama-UID dipertahankan karena format
-  // RFID di lapangan memang 10 digit desimal (contoh: "9586235215"), konsisten dengan
-  // kartu yang dipakai saat ini. Tidak diubah agar tidak memutus data presensi existing.
   if (len >= 4)
   {
     uint32_t v = ((uint32_t)uid[3] << 24) | ((uint32_t)uid[2] << 16) | ((uint32_t)uid[1] << 8) | uid[0];
@@ -2955,10 +2716,8 @@ void uidToString(uint8_t *uid, uint8_t len, char *out)
 
 bool kirimLangsung(const char *rfid, const char *ts, char *msg)
 {
-  Serial.printf("[HTTP] kirimLangsung: rfid=%s ts=%s\n", rfid, ts);
   if (!isWifiConnected())
   {
-    Serial.println("[HTTP] No WiFi.");
     return false;
   }
   HTTPClient http;
@@ -2969,7 +2728,6 @@ bool kirimLangsung(const char *rfid, const char *ts, char *msg)
   strcat(url, "/api/presensi");
   if (!http.begin(getHttpClient(), url))
   {
-    Serial.println("[HTTP] http.begin failed.");
     return false;
   }
   http.addHeader(F("Content-Type"), F("application/json"));
@@ -2980,7 +2738,6 @@ bool kirimLangsung(const char *rfid, const char *ts, char *msg)
            rfid, ts, deviceId);
   int code = http.POST(payload);
   http.end();
-  Serial.printf("[HTTP] kirimLangsung code=%d\n", code);
   if (code == 200)
   {
     strcpy(msg, "PRESENSI OK");
@@ -3005,24 +2762,16 @@ bool kirimLangsung(const char *rfid, const char *ts, char *msg)
   return false;
 }
 
-// GAP-10: pemeriksaan scan berulang terpadu berbasis NVS-last-scan, dipakai di seluruh
-// jalur (SD, direct HTTP, offline buffer) agar perilaku konsisten. Sebelumnya hanya
-// dipanggil pada jalur SD, sehingga jalur direct-HTTP-fallback dan offline-buffer
-// tidak memiliki proteksi duplikasi lokal sama sekali.
 bool isDuplicateScanRecent(const char *rfid, unsigned long t, const char *sourceTag)
 {
   bool dup = nvsIsRecentScan(rfid, t);
-  if (dup)
-    Serial.printf("[DEDUP] Duplikat terdeteksi via NVS-last-scan (sumber=%s) rfid=%s\n", sourceTag, rfid);
   return dup;
 }
 
 bool kirimPresensi(const char *rfid, char *msg)
 {
-  Serial.printf("kirimPresensi: rfid=%s sdAvail=%d wifiConn=%d\n", rfid, sdCardAvailable, isWifiConnected());
   if (!isTimeValid())
   {
-    Serial.println("[PRESENSI] Waktu tidak valid.");
     strcpy(msg, "WAKTU INVALID");
     return false;
   }
@@ -3030,8 +2779,6 @@ bool kirimPresensi(const char *rfid, char *msg)
   getFormattedTimestamp(ts, sizeof(ts));
   time_t now = time(nullptr);
 
-  // GAP-10: pemeriksaan duplikasi terpadu, berlaku untuk seluruh jalur penyimpanan
-  // (sebelumnya hanya diperiksa jika SD tersedia).
   const char *pathTag = sdCardAvailable ? "SD" : (isWifiConnected() ? "DIRECT_HTTP" : "OFFLINE_BUFFER");
   if (isDuplicateScanRecent(rfid, (unsigned long)now, pathTag))
   {
@@ -3043,32 +2790,24 @@ bool kirimPresensi(const char *rfid, char *msg)
   {
     if (!isRfidInCache(rfid))
     {
-      Serial.printf("[PRESENSI] rfid=%s not in cache.\n", rfid);
       strcpy(msg, "RFID NONAKTIF");
       return false;
     }
     SaveResult r = saveToQueue(rfid, ts, (unsigned long)now);
-    Serial.printf("kirimPresensi: saveResult=%d\n", r);
     switch (r)
     {
     case SAVE_OK:
       nvsBumpScanCount();
       nvsSaveLastScan(rfid, (unsigned long)now);
-      Serial.printf("[PRESENSI] Saved to queue. queueWarn=%d\n", cachedQueueFileCount >= QUEUE_WARN_THRESHOLD);
       strcpy(msg, cachedQueueFileCount >= QUEUE_WARN_THRESHOLD ? "QUEUE HAMPIR PENUH!" : "DATA TERSIMPAN");
       return true;
     case SAVE_DUPLICATE:
-      // GAP-10: lapis kedua ini berbasis isi file antrian SD (independen dari cache
-      // NVS-last-scan di atas), disengaja sebagai pertahanan tambahan, bukan duplikasi logika mati.
-      Serial.println("[PRESENSI] Duplicate in queue (deteksi lapis SD).");
       strcpy(msg, "CUKUP SEKALI!");
       return false;
     case SAVE_QUEUE_FULL:
-      Serial.println("[PRESENSI] Queue full.");
       strcpy(msg, "QUEUE PENUH!");
       return false;
     default:
-      Serial.println("[PRESENSI] SD error.");
       strcpy(msg, "SD CARD ERROR");
       return false;
     }
@@ -3076,7 +2815,6 @@ bool kirimPresensi(const char *rfid, char *msg)
 
   if (isWifiConnected())
   {
-    Serial.println("[PRESENSI] No SD, trying direct HTTP...");
     if (kirimLangsung(rfid, ts, msg))
     {
       nvsBumpScanCount();
@@ -3086,15 +2824,10 @@ bool kirimPresensi(const char *rfid, char *msg)
 
     if (strcmp(msg, "CUKUP SEKALI!") == 0 || strcmp(msg, "RFID NONAKTIF") == 0 || strcmp(msg, "HARI LIBUR!") == 0)
     {
-      Serial.printf("[PRESENSI] Server rejected: %s\n", msg);
       return false;
     }
-    Serial.println("[PRESENSI] HTTP fail, saving to NVS buffer...");
-    // GAP-10: nvsIsDuplicate() sebelumnya tidak pernah dipanggil di manapun (dead code).
-    // Sekarang dipakai agar jalur fallback buffer NVS juga terlindungi dari duplikasi.
     if (nvsIsDuplicate(rfid, (unsigned long)now))
     {
-      Serial.printf("[DEDUP] Duplikat terdeteksi via NVS-buffer-scan (sumber=DIRECT_HTTP_FALLBACK) rfid=%s\n", rfid);
       strcpy(msg, "CUKUP SEKALI!");
       return false;
     }
@@ -3102,20 +2835,15 @@ bool kirimPresensi(const char *rfid, char *msg)
     {
       nvsBumpScanCount();
       nvsSaveLastScan(rfid, (unsigned long)now);
-      Serial.printf("[PRESENSI] Saved to NVS buffer: %d/%d\n", nvsGetCount(), NVS_MAX_RECORDS);
       snprintf(msg, 32, "BUFFER %d/%d", nvsGetCount(), NVS_MAX_RECORDS);
       return true;
     }
-    Serial.println("[PRESENSI] NVS buffer full.");
     strcpy(msg, "BUFFER PENUH!");
     return false;
   }
 
-  Serial.println("[PRESENSI] Offline, saving to NVS buffer...");
-  // GAP-10: pemeriksaan duplikasi buffer NVS juga diterapkan pada jalur offline murni.
   if (nvsIsDuplicate(rfid, (unsigned long)now))
   {
-    Serial.printf("[DEDUP] Duplikat terdeteksi via NVS-buffer-scan (sumber=OFFLINE_BUFFER) rfid=%s\n", rfid);
     strcpy(msg, "CUKUP SEKALI!");
     return false;
   }
@@ -3123,11 +2851,9 @@ bool kirimPresensi(const char *rfid, char *msg)
   {
     nvsBumpScanCount();
     nvsSaveLastScan(rfid, (unsigned long)now);
-    Serial.printf("[PRESENSI] Offline NVS saved: %d/%d\n", nvsGetCount(), NVS_MAX_RECORDS);
     snprintf(msg, 32, "BUFFER %d/%d", nvsGetCount(), NVS_MAX_RECORDS);
     return true;
   }
-  Serial.println("[PRESENSI] NVS buffer full in offline mode.");
   strcpy(msg, "BUFFER PENUH!");
   return false;
 }
@@ -3270,23 +2996,25 @@ void checkFactoryReset()
 {
   if (digitalRead(PIN_BOOT) != LOW)
     return;
-  esp_task_wdt_reset(); // GAP-17
+  esp_task_wdt_reset();
   vTaskDelay(pdMS_TO_TICKS(100));
   if (digitalRead(PIN_BOOT) != LOW)
     return;
-  esp_task_wdt_reset(); // GAP-17
+  esp_task_wdt_reset();
   vTaskDelay(pdMS_TO_TICKS(100));
   if (digitalRead(PIN_BOOT) != LOW)
     return;
-  esp_task_wdt_reset(); // GAP-17
+  esp_task_wdt_reset();
+
   unsigned long held = millis();
   showOLED(F("TAHAN UNTUK"), "FACTORY RESET");
+  int lowStreak = 0;
   while (digitalRead(PIN_BOOT) == LOW)
   {
     esp_task_wdt_reset();
+    lowStreak++;
     if (millis() - held >= FACTORY_RESET_HOLD_MS)
     {
-      Serial.println("[RESET] Factory reset triggered!");
       showOLED(F("FACTORY RESET"), "MENGHAPUS...");
       playToneError();
       delay(500);
@@ -3494,35 +3222,25 @@ static String provHtmlPage()
   return html;
 }
 
-// GAP-02: password AP diturunkan dari MAC address per-device, menggantikan
-// password statis yang sebelumnya sama untuk seluruh unit di lapangan.
 static void deriveProvisioningPassword(char *out, size_t outSz)
 {
   uint8_t mac[6];
   esp_efuse_mac_get_default(mac);
-  // TODO: GAP-02 ASUMSI - format "ATN-XXXXXX" (6 hex dari 3 byte terakhir MAC).
-  // Panjang 10 karakter memenuhi syarat minimum WPA2 (8 karakter) dan cukup ringkas
-  // untuk dibaca dan diketik ulang oleh admin dari layar OLED 128x64.
-  snprintf(out, outSz, "ATN-%02X%02X%02X", mac[3], mac[4], mac[5]);
+  snprintf(out, outSz, "ZEDLABS-%02X%02X%02X", mac[3], mac[4], mac[5]);
 }
 
 void startProvisioningMode()
 {
-  Serial.println("[PROV] Entering provisioning mode...");
-  deriveProvisioningPassword(provApPassword, sizeof(provApPassword)); // GAP-02
+  deriveProvisioningPassword(provApPassword, sizeof(provApPassword));
   showOLED(F("PROVISIONING"), PROV_AP_SSID);
   delay(1500);
-  showOLED(F("AP PASSWORD"), provApPassword); // GAP-02: tampilkan password ke admin lapangan
+  showOLED(F("AP PASSWORD"), provApPassword);
   delay(2500);
   WiFi.mode(WIFI_AP);
   WiFi.softAP(PROV_AP_SSID, provApPassword);
-  Serial.printf("[PROV] AP started: %s, IP: %s\n", PROV_AP_SSID, WiFi.softAPIP().toString().c_str());
-  Serial.printf("[PROV] AP password (per-device): %s\n", provApPassword);
   dnsServer.start(PROV_DNS_PORT, "*", WiFi.softAPIP());
   provServer.on("/", HTTP_GET, []()
                 { provServer.send(200, "text/html", provHtmlPage()); });
-  // GAP-14: keputusan sadar - halaman /save tetap dilayani via HTTP polos (bukan HTTPS).
-  // Risiko diterima karena AP hanya aktif sesaat saat setup dan cakupan sinyal terbatas.
   provServer.on("/save", HTTP_POST, []()
                 {
     String s1 = provServer.arg("ssid1"), p1 = provServer.arg("pass1");
@@ -3550,7 +3268,6 @@ void startProvisioningMode()
       return;
     }
     if (dn.length() > DEVICE_NAME_MAX_LEN) {
-      Serial.printf("[PROV] Device name too long (%d), truncating.\n", dn.length());
       dn = dn.substring(0, DEVICE_NAME_MAX_LEN);
     }
 
@@ -3563,9 +3280,6 @@ void startProvisioningMode()
     int iSlpE = parseHour(slpE, SLEEP_END_HOUR_DEFAULT);
     int iDimS = parseHour(dimS, OLED_DIM_START_HOUR_DEFAULT);
     int iDimE = parseHour(dimE, OLED_DIM_END_HOUR_DEFAULT);
-
-    Serial.printf("[PROV] Saving: ssid1=%s apiurl=%s devname=%s\n", s1.c_str(), aurl.c_str(), dn.c_str());
-    Serial.printf("[PROV] sleep=%d-%d dim=%d-%d\n", iSlpS, iSlpE, iDimS, iDimE);
 
     saveCredential(NVS_KEY_SSID1, s1.c_str());
     saveCredential(NVS_KEY_PASS1, p1.c_str());
@@ -3585,7 +3299,6 @@ void startProvisioningMode()
     prefs.end();
 
     markProvisioned();
-    Serial.println("[PROV] Credentials saved. Restarting...");
     provServer.send(200, "text/html",
                     "<html><body style='font-family:sans-serif;text-align:center;padding:40px'>"
                     "<h2>&#10003; Tersimpan!</h2><p>Device akan restart dalam 2 detik...</p>"
@@ -3604,7 +3317,6 @@ void startProvisioningMode()
     esp_task_wdt_reset();
     delay(10);
   }
-  Serial.println("[PROV] Provisioning timeout. Restarting...");
   showOLED(F("TIMEOUT"), "RESTART...");
   delay(2000);
   ESP.restart();
@@ -3614,7 +3326,6 @@ void taskRfid(void *param)
 {
   (void)param;
   esp_task_wdt_add(nullptr);
-  Serial.println("[TASK] taskRfid started.");
   for (;;)
   {
     esp_task_wdt_reset();
@@ -3630,18 +3341,15 @@ void taskRfid(void *param)
       uidToString(ev.uid, ev.uidLen, rfidBuf);
       if (strcmp(rfidBuf, lastUID) == 0 && millis() - timers.lastScan < DEBOUNCE_TIME)
       {
-        Serial.printf("[RFID] Debounced: %s\n", rfidBuf);
         continue;
       }
       strcpy(lastUID, rfidBuf);
       timers.lastScan = millis();
-      Serial.printf("[RFID] Card scanned: %s\n", rfidBuf);
       bool wasOff = !oledIsOn;
       if (wasOff)
         turnOnOLED();
       if (isAdminRfid(rfidBuf))
       {
-        Serial.printf("[RFID] Admin card detected: %s\n", rfidBuf);
         handleAdminScan(rfidBuf);
       }
       else
@@ -3650,7 +3358,6 @@ void taskRfid(void *param)
         playToneNotify();
         char msg[32];
         bool ok = kirimPresensi(rfidBuf, msg);
-        Serial.printf("[RFID] kirimPresensi result=%d msg=%s\n", ok, msg);
         showOLED(ok ? F("BERHASIL") : F("INFO"), msg);
         ok ? playToneSuccess() : playToneError();
       }
@@ -3664,7 +3371,6 @@ void taskSync(void *param)
 {
   (void)param;
   esp_task_wdt_add(nullptr);
-  Serial.println("[TASK] taskSync started.");
   for (;;)
   {
     esp_task_wdt_reset();
@@ -3674,7 +3380,7 @@ void taskSync(void *param)
       continue;
     }
     unsigned long now = millis();
-    RuntimeConfig cfg = getRuntimeConfigSnapshot(); // GAP-12
+    RuntimeConfig cfg = getRuntimeConfigSnapshot();
     processReconnect();
     checkSDHealth();
     if (isWifiConnected())
@@ -3692,7 +3398,6 @@ void taskSync(void *param)
       if (nvsGetCount() > 0 && now - timers.lastNvsSync >= cfg.syncIntervalMs)
       {
         timers.lastNvsSync = now;
-        Serial.println("[TASK] Triggering NVS sync...");
         nvsSyncToServer();
       }
       if (sdCardAvailable)
@@ -3705,7 +3410,6 @@ void taskSync(void *param)
           timers.lastSync = now;
           if (cachedPendingRecords > 0)
           {
-            Serial.printf("[TASK] Triggering SD sync: %d pending\n", cachedPendingRecords);
             chunkedSync();
           }
         }
@@ -3720,7 +3424,6 @@ void taskDisplay(void *param)
 {
   (void)param;
   esp_task_wdt_add(nullptr);
-  Serial.println("[TASK] taskDisplay started.");
   for (;;)
   {
     esp_task_wdt_reset();
@@ -3754,10 +3457,6 @@ void taskDisplay(void *param)
 void setup()
 {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("=== BOOT ===");
-  Serial.printf("[SETUP] Firmware: v%s\n", FIRMWARE_VERSION);
-
   esp_task_wdt_deinit();
   const esp_task_wdt_config_t wdtCfg = {
       .timeout_ms = WDT_NORMAL_TIMEOUT_MS,
@@ -3765,32 +3464,27 @@ void setup()
       .trigger_panic = true};
   esp_task_wdt_init(&wdtCfg);
   esp_task_wdt_add(nullptr);
-  Serial.println("[SETUP] WDT initialized (60s).");
 
   esp_ota_mark_app_valid_cancel_rollback();
-  Serial.println("[SETUP] OTA rollback cancelled.");
 
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
   pinMode(PIN_BUZZER, OUTPUT);
   pinMode(PIN_BOOT, INPUT_PULLUP);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  Serial.println("[SETUP] OLED initialized.");
   showStartupAnimation();
   playStartupMelody();
   esp_task_wdt_reset();
 
   xSdMutex = xSemaphoreCreateMutex();
   xDisplayMutex = xSemaphoreCreateMutex();
-  xConfigMutex = xSemaphoreCreateMutex(); // GAP-12
+  xConfigMutex = xSemaphoreCreateMutex();
   xRfidQueue = xQueueCreate(RFID_QUEUE_LEN, sizeof(RfidScanEvent));
-  Serial.println("[SETUP] FreeRTOS objects created.");
 
   uint8_t mac[6];
   WiFi.macAddress(mac);
   snprintf(deviceId, sizeof(deviceId), "ESP32_%02X%02X", mac[4], mac[5]);
   for (int i = 0; deviceId[i]; i++)
     deviceId[i] = toupper(deviceId[i]);
-  Serial.printf("[SETUP] Device ID: %s\n", deviceId);
 
   if (timeWasSynced && lastValidTime > 0 && sleepDurationSeconds > 0)
   {
@@ -3799,7 +3493,6 @@ void setup()
     bootTime = millis();
     bootTimeSet = true;
     sleepDurationSeconds = 0;
-    Serial.printf("[SETUP] Adjusted time after sleep: %lu\n", (unsigned long)lastValidTime);
   }
   if (!timeWasSynced || lastValidTime == 0)
   {
@@ -3810,18 +3503,15 @@ void setup()
       timeWasSynced = true;
       bootTime = millis();
       bootTimeSet = true;
-      Serial.printf("[SETUP] Restored last valid time from NVS: %lu\n", (unsigned long)lastValidTime);
     }
     else
     {
-      Serial.println("[SETUP] No saved time in NVS.");
     }
   }
 
   isProvisioned = checkProvisioned();
   if (!isProvisioned)
   {
-    Serial.println("[SETUP] Not provisioned, entering provisioning mode.");
     showOLED(F("BELUM DIKONFIGURASI"), "MASUK SETUP MODE");
     delay(2000);
     startProvisioningMode();
@@ -3829,15 +3519,9 @@ void setup()
   }
 
   loadCredentials();
-  Serial.printf("API Key: '%s'\n", apiKey);
-  Serial.printf("API URL: '%s'\n", apiBaseUrl);
-  Serial.printf("WiFi SSID: '%s'\n", wifiCreds[0].ssid);
-  Serial.printf("Device Name: '%s'\n", deviceName);
-  Serial.printf("[DEBUG] NVS count at boot: %d\n", nvsGetCount());
 
   if (strlen(apiKey) == 0 || strlen(wifiCreds[0].ssid) == 0)
   {
-    Serial.println("[SETUP] Config incomplete, entering provisioning mode.");
     showOLED(F("CONFIG ERROR"), "MASUK SETUP MODE");
     delay(2000);
     startProvisioningMode();
@@ -3848,28 +3532,23 @@ void setup()
   {
     if (strlen(deviceName) > DEVICE_NAME_MAX_LEN)
     {
-      Serial.printf("[SETUP] WARNING: deviceName too long (%d chars), truncating.\n", strlen(deviceName));
       deviceName[DEVICE_NAME_MAX_LEN] = '\0';
     }
     snprintf(deviceId, sizeof(deviceId), "%s", deviceName);
-    Serial.printf("[SETUP] Device name override: %s\n", deviceId);
   }
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
-  Serial.println("[SETUP] SPI initialized.");
 
   showProgress(F("INIT SD CARD"), 1500);
   sdCardAvailable = initSDCard();
   if (sdCardAvailable)
   {
-    Serial.println("[SETUP] SD card OK.");
     showOLED(F("SD CARD"), "TERSEDIA");
     playToneSuccess();
     delay(800);
     refreshPendingCache();
     if (cachedPendingRecords > 0)
     {
-      Serial.printf("[SETUP] Pending SD records: %d\n", cachedPendingRecords);
       char buf[20];
       snprintf(buf, sizeof(buf), "%d TERSISA", cachedPendingRecords);
       showOLED(F("DATA OFFLINE"), buf);
@@ -3887,14 +3566,12 @@ void setup()
   }
   else
   {
-    Serial.println("[SETUP] SD card NOT available.");
     showOLED(F("SD CARD"), "TIDAK ADA");
     playToneError();
     delay(1000);
     int nc = nvsGetCount();
     if (nc > 0)
     {
-      Serial.printf("[SETUP] NVS buffer has %d records.\n", nc);
       char buf[20];
       snprintf(buf, sizeof(buf), "%d TERSISA", nc);
       showOLED(F("NVS BUFFER"), buf);
@@ -3913,7 +3590,6 @@ void setup()
         getQueueFileName(i, fn, sizeof(fn));
         if (sd.exists(fn))
         {
-          Serial.printf("[DEBUG] Found queue file: %s\n", fn);
         }
       }
       deselectSD();
@@ -3927,14 +3603,12 @@ void setup()
 
   if (!wifiOk)
   {
-    Serial.println("[SETUP] WiFi FAILED, going offline.");
     showOLED(F("NO WIFI"), "OFFLINE MODE");
     playToneError();
     delay(1500);
   }
   else
   {
-    Serial.println("[SETUP] WiFi connected, syncing time...");
     showOLED(F("SYNCING TIME"), "MOHON TUNGGU...");
     syncTimeWithFallback();
     esp_task_wdt_reset();
@@ -3943,7 +3617,6 @@ void setup()
     while (!pingAPI() && apiRetry < 3)
     {
       apiRetry++;
-      Serial.printf("[SETUP] API ping failed, retry %d/3\n", apiRetry);
       char buf[12];
       snprintf(buf, sizeof(buf), "Retry %d/3", apiRetry);
       showOLED(F("API GAGAL"), buf);
@@ -3953,7 +3626,6 @@ void setup()
     }
     if (isOnline && !isSignalCritical())
     {
-      Serial.println("[SETUP] API online.");
       showOLED(F("API OK"), "ONLINE");
       playToneSuccess();
       delay(500);
@@ -3961,7 +3633,6 @@ void setup()
       int nc = nvsGetCount();
       if (nc > 0)
       {
-        Serial.printf("[SETUP] Syncing %d NVS records...\n", nc);
         char buf[20];
         snprintf(buf, sizeof(buf), "%d NVS RECORDS", nc);
         showOLED(F("SYNC NVS"), buf);
@@ -3974,7 +3645,6 @@ void setup()
         refreshPendingCache();
         if (cachedPendingRecords > 0)
         {
-          Serial.printf("[SETUP] Syncing %d SD records on boot...\n", cachedPendingRecords);
           char buf[20];
           snprintf(buf, sizeof(buf), "%d records", cachedPendingRecords);
           showOLED(F("SYNC DATA"), buf);
@@ -3984,12 +3654,10 @@ void setup()
         }
         showProgress(F("SYNC RFID DB"), 500);
         unsigned long lv = nvsGetRfidDbVer(), sv = checkRfidDbVersion();
-        Serial.printf("[SETUP] RFID DB: local=%lu server=%lu\n", lv, sv);
         if (sv > lv)
           downloadRfidDb();
         else
         {
-          Serial.println("[SETUP] RFID DB up to date.");
           showOLED(F("RFID DB"), "UP TO DATE");
         }
         delay(600);
@@ -3998,7 +3666,6 @@ void setup()
     }
     else
     {
-      Serial.println("[SETUP] API unreachable, going offline.");
       showOLED(F("API GAGAL"), "OFFLINE MODE");
       playToneError();
       delay(1500);
@@ -4010,20 +3677,16 @@ void setup()
   delay(100);
   digitalWrite(PIN_RFID_SS, HIGH);
   byte ver = rfidReader.PCD_ReadRegister(rfidReader.VersionReg);
-  Serial.printf("[SETUP] RC522 version register: 0x%02X\n", ver);
   if (ver == 0x00 || ver == 0xFF)
   {
-    Serial.println("[SETUP] RC522 not detected! Restarting...");
     showOLED(F("RC522 GAGAL"), "RESTART...");
     playToneError();
     delay(3000);
     ESP.restart();
   }
-  Serial.println("[SETUP] RC522 OK.");
 
   showOLED(F("SISTEM SIAP"), isOnline ? "ONLINE" : "OFFLINE");
   playToneSuccess();
-  Serial.printf("[SETUP] System ready. Online=%d\n", isOnline);
 
   if (!bootTimeSet)
   {
@@ -4043,16 +3706,13 @@ void setup()
   timers.lastRfidDbCheck = now;
   timers.lastTelemetry = now;
   timers.lastRemoteConfig = now;
-  // timers.lastFactoryCheck = now;
   delay(1000);
   checkOLEDSchedule();
 
   hTaskLoop = xTaskGetCurrentTaskHandle();
-  Serial.println("[SETUP] Starting FreeRTOS tasks...");
   xTaskCreatePinnedToCore(taskRfid, "rfid", TASK_RFID_STACK, nullptr, TASK_RFID_PRIORITY, &hTaskRfid, 0);
   xTaskCreatePinnedToCore(taskSync, "sync", TASK_SYNC_STACK, nullptr, TASK_SYNC_PRIORITY, &hTaskSync, 0);
   xTaskCreatePinnedToCore(taskDisplay, "disp", TASK_DISPLAY_STACK, nullptr, TASK_DISPLAY_PRIORITY, &hTaskDisplay, 0);
-  Serial.println("[SETUP] All tasks started. Entering loop.");
 }
 
 void loop()
@@ -4061,7 +3721,6 @@ void loop()
 
   if (rfidReader.PICC_IsNewCardPresent() && rfidReader.PICC_ReadCardSerial())
   {
-    Serial.printf("[LOOP] New card detected, UID len=%d\n", rfidReader.uid.size);
     RfidScanEvent ev;
     memcpy(ev.uid, rfidReader.uid.uidByte, rfidReader.uid.size);
     ev.uidLen = rfidReader.uid.size;
@@ -4073,24 +3732,20 @@ void loop()
   struct tm ti;
   if (getTimeWithFallback(&ti))
   {
-    RuntimeConfig cfg = getRuntimeConfigSnapshot(); // GAP-12
+    RuntimeConfig cfg = getRuntimeConfigSnapshot();
     int h = ti.tm_hour;
     if (h >= cfg.sleepStartHour || h < cfg.sleepEndHour)
     {
       if (syncState.inProgress)
         return;
 
-      Serial.printf("[SLEEP] Entering deep sleep at %02d:%02d\n", ti.tm_hour, ti.tm_min);
-
       sleepRequested = true;
-      Serial.println("[SLEEP] Signaling tasks to idle...");
       unsigned long waitStart = millis();
       while (millis() - waitStart < DEEP_SLEEP_TASK_WAIT_MS)
       {
         esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(100));
       }
-      Serial.println("[SLEEP] Task wait done, flushing files...");
 
       flushAllFiles();
       showOLED(F("SLEEP MODE"), "...");
@@ -4106,8 +3761,6 @@ void loop()
       if (sleepSec > 43200)
         sleepSec = 43200;
 
-      Serial.printf("[SLEEP] Sleep duration: %d seconds (%dj %dm)\n",
-                    sleepSec, sleepSec / 3600, (sleepSec % 3600) / 60);
       char buf[24];
       snprintf(buf, sizeof(buf), "%dj %dm", sleepSec / 3600, (sleepSec % 3600) / 60);
       showOLED(F("SLEEP FOR"), buf);
@@ -4135,7 +3788,6 @@ void loop()
       esp_task_wdt_deinit();
 
       esp_sleep_enable_timer_wakeup((uint64_t)sleepSec * 1000000ULL);
-      Serial.println("[SLEEP] Going to deep sleep now.");
       esp_deep_sleep_start();
     }
   }
