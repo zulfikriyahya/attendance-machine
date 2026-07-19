@@ -74,24 +74,24 @@ Setiap mekanisme kriptografi (kunci AES, salt, TLS) yang diubah harus dinyatakan
 
 Berdasarkan hasil review SRS terhadap source code (`ATTENDANCE MACHINE v2.3.1`), berikut daftar gap yang perlu ditindaklanjuti. Tandai setiap penyelesaian dengan nomor gap terkait pada komentar kode (`// TODO: GAP-01`, dst.) dan pada bagian "Status verifikasi" di balasan.
 
-- [ ] **GAP-01** - Konflik pin `PIN_BOOT` (GPIO9) dengan `PIN_OLED_SCL` (GPIO9). Perlu keputusan: pindah pin fisik atau nonaktifkan salah satu fungsi selama pin dipakai bersama.
-- [ ] **GAP-02** - Password AP provisioning `P@ssw0rd` hardcoded dan seragam di semua unit. Perlu mekanisme password unik per device (mis. turunan dari MAC) atau minimal parameter build-time yang tidak dikomit ke repo publik.
-- [ ] **GAP-03** - `setInsecure()` pada seluruh koneksi HTTPS menonaktifkan verifikasi sertifikat TLS. Perlu keputusan: pin sertifikat/CA root backend atau terima risiko ini secara eksplisit dengan dokumentasi mitigasi.
-- [ ] **GAP-04** - Kunci AES diturunkan dari MAC address (dapat diketahui publik) + salt tetap yang ada di source. Perlu evaluasi apakah tingkat proteksi ini cukup untuk kredensial WiFi/API key yang disimpan, atau perlu skema key management yang lebih kuat.
-- [ ] **GAP-05** - AES-CBC tanpa autentikasi integritas (tidak ada HMAC/AEAD). Perlu keputusan: tambah HMAC-SHA256 atau migrasi ke AES-GCM.
-- [ ] **GAP-06** - `uidToString()` untuk UID ≥4 byte hanya memakai 4 byte pertama, berisiko collision pada kartu ber-UID panjang (7 byte). Perlu keputusan apakah encoding RFID perlu diubah untuk menampung UID penuh.
-- [ ] **GAP-07** - Perbandingan versi firmware OTA memakai `strcmp` leksikal, salah untuk kasus "2.10.0" vs "2.9.0". Perlu implementasi pembanding versi semantik (parse major.minor.patch).
-- [ ] **GAP-08** - `http.getSize()` bisa bernilai -1 (chunked transfer), dikonversi ke `size_t` jadi nilai sangat besar dan dipakai di `Update.begin()`. Perlu validasi eksplisit sebelum `Update.begin()`.
-- [ ] **GAP-09** - `saveToQueue()` hanya cek satu file berikutnya saat penuh, bisa melaporkan `SAVE_QUEUE_FULL` prematur. Perlu keputusan: perluas pencarian slot kosong atau terima batasan ini dengan dokumentasi.
-- [ ] **GAP-10** - Logika duplikasi scan tersebar dan tidak konsisten antara jalur SD, NVS, dan direct HTTP. Perlu disatukan dalam satu fungsi pemeriksa duplikasi yang dipakai di semua jalur.
-- [ ] **GAP-11** - Cache RFID RAM dibatasi 5000 entri tanpa peringatan jika database server lebih besar. Perlu logging/telemetri saat truncation terjadi.
-- [ ] **GAP-12** - Akses ke `rtCfg`, `apiKey`, `wifiCreds`, `deviceId` lintas task tanpa mutex, berbeda dari SD/Display yang sudah dilindungi. Perlu evaluasi penambahan mutex atau justifikasi mengapa aman tanpa mutex.
-- [ ] **GAP-13** - `Timers::lastFactoryCheck` adalah variabel mati (tidak dipakai). Perlu dihapus atau diimplementasikan sesuai maksud awal.
-- [ ] **GAP-14** - Halaman provisioning `/save` dikirim lewat HTTP polos di AP lokal, kredensial transit sebagai plaintext. Perlu keputusan apakah risiko ini diterima (AP lokal terbatas) atau perlu HTTPS self-signed di web server provisioning.
-- [ ] **GAP-15** - Parsing unduhan RFID DB per karakter dengan buffer baris tetap 32 byte tanpa logging saat data terpotong. Perlu tambah validasi/log kegagalan format baris.
-- [ ] **GAP-16** - Seluruh device berbagi satu API key statis, dikombinasikan dengan TLS tanpa verifikasi (GAP-03). Perlu evaluasi apakah perlu API key per-device atau mekanisme device attestation.
-- [ ] **GAP-17** - Tiga pemeriksaan debounce awal pada `checkFactoryReset()` tanpa `esp_task_wdt_reset()` eksplisit. Perlu ditambahkan sebagai praktik defensif meski durasi masih aman.
-- [ ] **GAP-18** - Konfigurasi hasil `fetchRemoteConfig()` (jadwal sleep/dim, interval sync/OTA) hanya di RAM, hilang setelah restart/deep sleep. Perlu keputusan: persist ke NVS atau dokumentasikan sebagai perilaku yang disengaja (server harus resend tiap boot).
+- [x] **GAP-01** - Konflik pin `PIN_BOOT` (GPIO9) dengan `PIN_OLED_SCL` (GPIO9). Perlu keputusan: pindah pin fisik atau nonaktifkan salah satu fungsi selama pin dipakai bersama.
+- [x] **GAP-02** - Password AP provisioning `P@ssw0rd` hardcoded dan seragam di semua unit. Perlu mekanisme password unik per device (mis. turunan dari MAC) atau minimal parameter build-time yang tidak dikomit ke repo publik.
+- [x] **GAP-03** - `setInsecure()` pada seluruh koneksi HTTPS menonaktifkan verifikasi sertifikat TLS. Perlu keputusan: pin sertifikat/CA root backend atau terima risiko ini secara eksplisit dengan dokumentasi mitigasi.
+- [x] **GAP-04** - Kunci AES diturunkan dari MAC address (dapat diketahui publik) + salt tetap yang ada di source. Perlu evaluasi apakah tingkat proteksi ini cukup untuk kredensial WiFi/API key yang disimpan, atau perlu skema key management yang lebih kuat.
+- [x] **GAP-05** - AES-CBC tanpa autentikasi integritas (tidak ada HMAC/AEAD). Perlu keputusan: tambah HMAC-SHA256 atau migrasi ke AES-GCM.
+- [x] **GAP-06** - `uidToString()` untuk UID ≥4 byte hanya memakai 4 byte pertama, berisiko collision pada kartu ber-UID panjang (7 byte). Perlu keputusan apakah encoding RFID perlu diubah untuk menampung UID penuh.
+- [x] **GAP-07** - Perbandingan versi firmware OTA memakai `strcmp` leksikal, salah untuk kasus "2.10.0" vs "2.9.0". Perlu implementasi pembanding versi semantik (parse major.minor.patch).
+- [x] **GAP-08** - `http.getSize()` bisa bernilai -1 (chunked transfer), dikonversi ke `size_t` jadi nilai sangat besar dan dipakai di `Update.begin()`. Perlu validasi eksplisit sebelum `Update.begin()`.
+- [x] **GAP-09** - `saveToQueue()` hanya cek satu file berikutnya saat penuh, bisa melaporkan `SAVE_QUEUE_FULL` prematur. Perlu keputusan: perluas pencarian slot kosong atau terima batasan ini dengan dokumentasi.
+- [x] **GAP-10** - Logika duplikasi scan tersebar dan tidak konsisten antara jalur SD, NVS, dan direct HTTP. Perlu disatukan dalam satu fungsi pemeriksa duplikasi yang dipakai di semua jalur.
+- [x] **GAP-11** - Cache RFID RAM dibatasi 5000 entri tanpa peringatan jika database server lebih besar. Perlu logging/telemetri saat truncation terjadi.
+- [x] **GAP-12** - Akses ke `rtCfg`, `apiKey`, `wifiCreds`, `deviceId` lintas task tanpa mutex, berbeda dari SD/Display yang sudah dilindungi. Perlu evaluasi penambahan mutex atau justifikasi mengapa aman tanpa mutex.
+- [x] **GAP-13** - `Timers::lastFactoryCheck` adalah variabel mati (tidak dipakai). Perlu dihapus atau diimplementasikan sesuai maksud awal.
+- [x] **GAP-14** - Halaman provisioning `/save` dikirim lewat HTTP polos di AP lokal, kredensial transit sebagai plaintext. Perlu keputusan apakah risiko ini diterima (AP lokal terbatas) atau perlu HTTPS self-signed di web server provisioning.
+- [x] **GAP-15** - Parsing unduhan RFID DB per karakter dengan buffer baris tetap 32 byte tanpa logging saat data terpotong. Perlu tambah validasi/log kegagalan format baris.
+- [x] **GAP-16** - Seluruh device berbagi satu API key statis, dikombinasikan dengan TLS tanpa verifikasi (GAP-03). Perlu evaluasi apakah perlu API key per-device atau mekanisme device attestation.
+- [x] **GAP-17** - Tiga pemeriksaan debounce awal pada `checkFactoryReset()` tanpa `esp_task_wdt_reset()` eksplisit. Perlu ditambahkan sebagai praktik defensif meski durasi masih aman.
+- [x] **GAP-18** - Konfigurasi hasil `fetchRemoteConfig()` (jadwal sleep/dim, interval sync/OTA) hanya di RAM, hilang setelah restart/deep sleep. Perlu keputusan: persist ke NVS atau dokumentasikan sebagai perilaku yang disengaja (server harus resend tiap boot).
 
 ---
 
