@@ -4,7 +4,7 @@
 
 ---
 
-![provisioning](firmware/v2.3.2/provisioning.png)
+![provisioning](provisioning.png)
 
 ---
 
